@@ -110,7 +110,9 @@ Authorization: Bearer <your MCP token>
 
 The token is separate from `ADMIN_PASSWORD`; local MCP clients do not need it while remote access is disabled.
 
-A typical agent workflow is to create feeds with `add_feed`, `add_feed_by_keyword`, or `add_wechat_feed`; optionally set criteria with `update_filter_config`; then call `get_uningested_news` on a schedule. It returns passed items from the requested time window, ordered by `item_id` ascending. If it returns `hasMore: true`, pass its `nextcursor` as `cursor` with the same parameters until it returns `false`.
+Behind a reverse proxy or tunnel, every client reaches NanoFlux from the proxy's address, which is often `127.0.0.1`. NanoFlux therefore treats any request carrying `Forwarded`, `X-Forwarded-For`, or `X-Real-IP` as remote. Make sure the proxy sends one of these headers (for nginx, add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`), and enable remote access with a token for clients that come through it.
+
+A typical agent workflow is to create feeds with `add_feed`, `add_feed_by_keyword`, or `add_wechat_feed`; optionally set criteria with `update_filter_config`; then call `get_uningested_news` on a schedule. It takes no parameters and returns up to 50 passed first-report items (not duplicates of an earlier item) from the last three days that it has not returned before, ordered by `item_id` ascending. The server remembers the last item returned, so if it returns `hasMore: true`, simply call it again until it returns `false`.
 
 | Tool | Description |
 | --- | --- |
@@ -119,8 +121,7 @@ A typical agent workflow is to create feeds with `add_feed`, `add_feed_by_keywor
 | `add_wechat_feed` | Search for and subscribe to a WeChat official account; pass `fakeid` when multiple matches exist |
 | `get_feeds` | List feeds, optionally filter by title keyword, and page with `nextCursor`; ordered by `updated_at DESC`, then `id DESC` |
 | `update_feed` / `delete_feed` | Update or delete a feed |
-| `get_uningested_news` | Get passed news in ascending `item_id` order; supports cursor pagination; default 20 items, maximum 50 |
-| `delete_item` | Hide an item by ID so its GUID is not fetched again |
+| `get_uningested_news` | Get the next 50 passed first-report news items from the last three days not returned before, in ascending `item_id` order; the cursor is kept on the server |
 | `get_filter_config` / `update_filter_config` | Read or update filter settings |
 | `get_current_time` | Get the server's current UTC time |
 | `send_telegram_message` | Send a headline, URL, and optional HTML content |
@@ -146,6 +147,7 @@ Create `.env` from `.env.example`. These variables are read when the process sta
 | Variable | Required | Description |
 | --- | --- | --- |
 | `PORT` | Yes | HTTP port; the example uses `3000` |
+| `HOST` | No | Listen address; defaults to `0.0.0.0` (all interfaces). Set `127.0.0.1` to accept local connections only |
 | `ADMIN_PASSWORD` | Yes | Password for the console and REST API |
 | `DB_PATH` | No | SQLite path; defaults to `data.sqlite` |
 | `LLM_BASE_URL` | No | OpenAI-compatible API base URL |
@@ -154,6 +156,9 @@ Create `.env` from `.env.example`. These variables are read when the process sta
 | `WECHATRSS_API_KEY` / `WECHATRSS_API_SECRET` | No | Credentials for WeChat official-account feeds |
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
 | `TELEGRAM_CHANNEL_ID` | No | Channel username (`@channel`) or numeric ID |
+| `FETCH_ALLOW_PRIVATE_HOSTS` | No | Comma-separated hostnames or IPs exempt from the private-address block, such as a LAN RSSHub |
+
+Feed, article, and cover requests are refused when a URL, or any redirect it follows, resolves to a loopback, private, link-local, or other non-public address. This keeps feed content from steering NanoFlux at internal services or cloud metadata endpoints.
 
 Outbound HTTP requests support the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` variables:
 
@@ -164,7 +169,7 @@ NO_PROXY=localhost,127.0.0.1
 
 ### `config.json`
 
-`config.json` is created and updated by the console, REST API, or MCP. It is ignored by Git and contains settings that can be changed at runtime:
+`config.json` is created and updated by the console, REST API, or MCP. It is ignored by Git and contains settings that can be changed at runtime. Missing sections and fields take their defaults; if the file is not valid JSON or a field has the wrong type, NanoFlux refuses to start and reports the problem instead of overwriting the file:
 
 ```json
 {
@@ -191,7 +196,7 @@ NO_PROXY=localhost,127.0.0.1
 }
 ```
 
-- When `filter.enabled` is on, source domains, title keywords, and then the LLM prompt are evaluated in that order. Domain and keyword matches do not call the LLM.
+- When `filter.enabled` is on, source domains, title keywords, and then the LLM prompt are evaluated in that order. Domain and keyword matches do not call the LLM, and are checked before the article page is fetched, so rejected items are never scraped. Google News items are matched by their `<source>` publisher domain before the Google link is resolved.
 - `translate.targetLang` supports `en`, `zh-Hans`, and `zh-Hant`.
 - Turning translation on with an empty `translate.prompt` fills in a default prompt.
 - If the LLM is not configured or a request fails, items that do not match a domain or keyword still pass through; translation failures preserve the original title.

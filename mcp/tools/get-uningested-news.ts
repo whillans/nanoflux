@@ -1,45 +1,24 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { z } from "zod";
-import { getMcpItems } from "../../db/items";
-import { MAX_LIMIT } from "../../db/schema";
+import { takeUningestedItems } from "../../db/items";
 
 export function registerGetUningestedNews(server: McpServer): void {
   server.registerTool(
     "get_uningested_news",
     {
       description:
-        "Fetch passed news from the last count days in ascending item_id order. When hasMore is true, call again with nextcursor to fetch the next batch until hasMore is false.",
-      inputSchema: {
-        count: z.number().int().min(1).describe("Number of days before now (e.g. 2 for the last 2 days)"),
-        cursor: z
-          .number()
-          .int()
-          .positive()
-          .safe()
-          .optional()
-          .describe("The item_id returned as nextcursor by a previous call"),
-      },
+        "Fetch the next batch of passed first-report news (not a duplicate of an earlier item) from the last 3 days that has not been returned before, in ascending item_id order. Takes no parameters: the server remembers the last item returned. When hasMore is true, call again to fetch the next batch until hasMore is false.",
+      inputSchema: {},
     },
 
-    async ({ count, cursor }) => {
+    async () => {
 
       try {
 
-        const { items: returned, hasMore } = getMcpItems({
-          unit: "day",
-          count,
-          limit: MAX_LIMIT,
-          cursor,
-        });
-        const nextcursor = hasMore ? returned.at(-1)?.id ?? null : null;
+        const { items: returned, hasMore } = takeUningestedItems();
 
         const message = hasMore
-          ? [
-              "More news remain.",
-              "Call get_uningested_news again with the same parameters and:",
-              `cursor=${nextcursor}`,
-            ].join(" ")
-          : "No more news in this window.";
+          ? "More news remain. Call get_uningested_news again."
+          : "No more news for now.";
 
         return {
           content: [
@@ -55,7 +34,6 @@ export function registerGetUningestedNews(server: McpServer): void {
                   feed_title: item.feed_title,
                 })),
                 hasMore,
-                nextcursor,
                 message,
               }),
             },

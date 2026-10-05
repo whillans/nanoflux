@@ -20,6 +20,12 @@ export const feeds = sqliteTable(
     last_build_date: text("last_build_date"),
     last_guids: text("last_guids"),
     last_published_at: text("last_published_at"),
+    /** Consecutive failed fetches; drives retry backoff. Reset on success. */
+    fetch_failures: integer("fetch_failures").notNull().default(0),
+    last_error: text("last_error"),
+    /** HTTP cache validators for conditional feed requests. */
+    http_etag: text("http_etag"),
+    http_last_modified: text("http_last_modified"),
     created_at: text("created_at")
       .notNull()
       .default(sql`(datetime('now'))`),
@@ -29,8 +35,6 @@ export const feeds = sqliteTable(
   },
   (table) => [
     index("idx_feeds_updated_at").on(table.updated_at),
-    index("idx_feeds_next_fetched_at").on(table.next_fetched_at),
-    index("idx_feeds_last_published_at").on(table.last_published_at),
   ],
 );
 
@@ -43,7 +47,7 @@ export const items = sqliteTable(
       .references(() => feeds.id, { onDelete: "cascade" }),
     guid: text("guid").notNull(),
     title: text("title").notNull(),
-    /** Space-separated Intl.Segmenter tokens of `title`; NULL until tokenized. */
+    /** Space-separated jieba keywords (nouns, verbs, abbreviations) of `title`; NULL until tokenized. */
     title_tokens: text("title_tokens"),
     content: text("content"),
     link: text("link").notNull(),
@@ -64,10 +68,23 @@ export const items = sqliteTable(
   (table) => [
     unique().on(table.guid),
     index("idx_items_published_at").on(table.published_at),
-    index("idx_items_sim_id").on(table.sim_id),
-    index("idx_items_cover").on(table.cover),
+    // Child key of the feeds FK cascade; also serves Fever "mark feed read".
+    index("idx_items_feed_id_published_at").on(table.feed_id, table.published_at),
+    // Covers Fever unread-id lists and status counts without touching row content.
+    index("idx_items_status_is_read").on(table.status, table.is_read),
+    // Status-filtered timeline; `is_read` lets read/unread filters skip row lookups.
+    index("idx_items_status_published_at").on(table.status, table.published_at, table.is_read),
+    // Almost every row is NULL in these columns, so index only the rest.
+    index("idx_items_sim_id").on(table.sim_id).where(sql`${table.sim_id} IS NOT NULL`),
+    index("idx_items_cover").on(table.cover, table.sim_id).where(sql`${table.cover} IS NOT NULL`),
   ],
 );
+
+/** Small key/value store for internal state, e.g. derived-data signatures. */
+export const meta = sqliteTable("t_meta", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
 
 export type Feed = InferSelectModel<typeof feeds>;
 export type Item = InferSelectModel<typeof items>;

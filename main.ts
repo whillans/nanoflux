@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { Elysia } from "elysia";
-import { requireAdminPassword, resolvePort } from "./shared/env";
+import { requireAdminPassword, resolveHost, resolvePort } from "./shared/env";
 import { withMcpAccess } from "./shared/mcp-access";
 import { createAuthRoutes, withAdminAuth } from "./api/auth";
 import { buildWebManifest } from "./shared/manifest";
@@ -65,7 +65,14 @@ try {
 }
 
 await ensureGoogleConnectivity();
-await loadAppConfig();
+try {
+  await loadAppConfig();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[config] ${message}`);
+  console.error("[config] Fix or remove config.json and restart; it was not modified.");
+  process.exit(1);
+}
 {
   const { prompt, enabled, keywords, sources } = getFilterConfig();
   console.log(
@@ -87,13 +94,13 @@ await loadAppConfig();
 console.log(`[fever] config loaded enabled=${isFeverEnabled()}`);
 {
   const { stopwords } = getTokenizerState();
-  const updated = syncTitleTokens();
+  const { updated, full } = syncTitleTokens();
   console.log(
-    `[tokenizer] config loaded stopwords=${stopwords.length} titleTokensUpdated=${updated}`,
+    `[tokenizer] config loaded stopwords=${stopwords.length} titleTokensUpdated=${updated}${full ? " (full resync)" : ""}`,
   );
 }
 
-const BIND_HOST = "0.0.0.0";
+const BIND_HOST = resolveHost();
 
 const adminAuth = {
   required: true,

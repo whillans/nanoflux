@@ -6,6 +6,7 @@ import {
   gte,
   gt,
   inArray,
+  isNull,
   lt,
   lte,
   or,
@@ -14,9 +15,10 @@ import {
 import type { SQLiteTransaction } from "drizzle-orm/sqlite-core";
 import { db } from "./database";
 import { getFeed } from "./feeds";
-import { feeds, items, DEFAULT_LIMIT, MAX_LIMIT } from "./schema";
+import { feeds, items, meta, DEFAULT_LIMIT, MAX_LIMIT } from "./schema";
 import { newItemId, decodeCursor, parseItemId, parseTimeRange, TimeUnit, toUtcIso } from "./utils";
-import { titleTokens } from "../utils/text";
+import { titleTokens, TITLE_TOKENS_VERSION } from "../utils/text";
+import { md5Hex } from "../utils/hash";
 import { getTokenizerState } from "../config";
 
 const COMMON_SECOND_LEVEL_SUFFIXES = new Set([
@@ -55,6 +57,8 @@ type ItemQueryOptions = {
   status?: "passed" | "rejected" | "deleted";
   cursor?: string;
   limit?: number;
+  /** Return only the first `contentChars` characters of content; full content when omitted. */
+  contentChars?: number;
 };
 
 export function getItems(options?: ItemQueryOptions): any[] {
@@ -110,7 +114,10 @@ export function getItems(options?: ItemQueryOptions): any[] {
         title: items.title,
         link: items.link,
         source: items.source,
-        content: items.content,
+        content:
+          options?.contentChars !== undefined
+            ? sql<string | null>`substr(${items.content}, 1, ${options.contentChars})`
+            : items.content,
         cover: items.cover,
         published_at: items.published_at,
         is_read: items.is_read,
@@ -372,21 +379,38 @@ export function addItems(
   }
 }
 
+const TITLE_TOKENS_SIGNATURE_KEY = "title_tokens_signature";
+
+/** Identifies the tokenizer rules and stopwords that stored `title_tokens` came from. */
+function titleTokensSignature(stopwords: string[]): string {
+  return md5Hex(JSON.stringify({ version: TITLE_TOKENS_VERSION, stopwords: [...stopwords].sort() }));
+}
+
 /**
- * Recompute `title_tokens` for every item and rewrite rows that differ.
- * Runs after config load so new or edited stopwords apply to stored items.
+ * Bring stored `title_tokens` up to date. Rows never tokenized are always
+ * filled; every row is recomputed only when the stopwords or tokenizer rules
+ * changed since the last sync. Runs after config load.
  */
-export function syncTitleTokens(): number {
-  const stopwords = new Set(getTokenizerState().stopwords);
+export function syncTitleTokens(): { updated: number; full: boolean } {
+  const { stopwords: stopwordList } = getTokenizerState();
+  const stopwords = new Set(stopwordList);
+  const signature = titleTokensSignature(stopwordList);
+  const stored = db
+    .select({ value: meta.value })
+    .from(meta)
+    .where(eq(meta.key, TITLE_TOKENS_SIGNATURE_KEY))
+    .get();
+  const full = stored?.value !== signature;
+
   const rows = db
     .select({ id: items.id, title: items.title, title_tokens: items.title_tokens })
     .from(items)
+    .where(full ? undefined : isNull(items.title_tokens))
     .all();
 
   const changed = rows
     .map((row) => ({ id: row.id, next: titleTokens(row.title, stopwords), prev: row.title_tokens }))
     .filter((row) => row.next !== row.prev);
-  if (changed.length === 0) return 0;
 
   db.transaction((tx) => {
     for (const row of changed) {
@@ -395,8 +419,14 @@ export function syncTitleTokens(): number {
         .where(eq(items.id, row.id))
         .run();
     }
+    if (full) {
+      tx.insert(meta)
+        .values({ key: TITLE_TOKENS_SIGNATURE_KEY, value: signature })
+        .onConflictDoUpdate({ target: meta.key, set: { value: signature } })
+        .run();
+    }
   });
-  return changed.length;
+  return { updated: changed.length, full };
 }
 
 type Tx = SQLiteTransaction<"sync", any, any, any>;
@@ -432,31 +462,45 @@ function resolveCluster(
 }
 
 /**
- * Visible items published within `windowMs` of `publishedAt`, for duplicate
- * detection. Callers filter by shared tokens.
+ * Title tokens of visible items published within `windowMs` of `publishedAt`,
+ * for ranking duplicate candidates. Only the columns needed to rank are read;
+ * `getDedupNews` loads the few that reach the LLM.
  */
 export function getDedupCandidates(
   publishedAt: string,
   windowMs: number,
-): { id: number; title: string; title_tokens: string | null; content: string | null; published_at: string }[] {
+): { id: number; title_tokens: string }[] {
   const center = Date.parse(publishedAt);
   if (Number.isNaN(center)) return [];
   return db
-    .select({
-      id: items.id,
-      title: items.title,
-      title_tokens: items.title_tokens,
-      content: items.content,
-      published_at: items.published_at,
-    })
+    .select({ id: items.id, title_tokens: sql<string>`${items.title_tokens}` })
     .from(items)
     .where(
       and(
         gte(items.published_at, new Date(center - windowMs).toISOString()),
         lte(items.published_at, new Date(center + windowMs).toISOString()),
         eq(items.status, "passed"),
+        sql`${items.title_tokens} IS NOT NULL AND ${items.title_tokens} != ''`,
       ),
     )
+    .all();
+}
+
+/** Title, date and the first `contentChars` characters of content for `ids`. */
+export function getDedupNews(
+  ids: number[],
+  contentChars: number,
+): { id: number; title: string; content: string | null; published_at: string }[] {
+  if (ids.length === 0) return [];
+  return db
+    .select({
+      id: items.id,
+      title: items.title,
+      content: sql<string | null>`substr(${items.content}, 1, ${contentChars})`,
+      published_at: items.published_at,
+    })
+    .from(items)
+    .where(inArray(items.id, ids))
     .all();
 }
 
@@ -559,62 +603,76 @@ export function markItemRead(id: number): void {
   }
 }
 
+const MCP_NEWS_CURSOR_KEY = "mcp_news_cursor";
+/** Only news published this recently is handed out to MCP. */
+const MCP_NEWS_WINDOW_MS = 3 * TimeUnit.DAY;
+
 /**
- * Lists visible items for MCP consumption by ascending item ID.
+ * Hands out the next batch of recent visible first reports (items that do not
+ * duplicate an earlier one) to MCP in ascending item ID order. The largest ID
+ * handed out is stored, so each call resumes after the previous one and no
+ * item is returned twice.
  */
-export function getMcpItems(options: Pick<ItemQueryOptions, "since" | "until" | "unit" | "count" | "limit"> & { cursor?: number }): {
-  items: any[];
+export function takeUningestedItems(): {
+  items: {
+    id: number;
+    title: string;
+    link: string;
+    content: string | null;
+    published_at: string;
+    feed_title: string;
+  }[];
   hasMore: boolean;
 } {
   try {
-    const requestedLimit = Math.min(Math.max(options.limit ?? DEFAULT_LIMIT, 1), MAX_LIMIT);
-    const relativeRange = options.unit && options.count
-      ? parseTimeRange(options.unit, options.count)
-      : undefined;
-    const since = options.since ?? relativeRange?.since;
-    const until = options.until ?? relativeRange?.until;
-    const timeFilter = since || until
-      ? and(
-          since ? gte(items.published_at, since) : undefined,
-          until ? lte(items.published_at, until) : undefined,
+    return db.transaction((tx) => {
+      const stored = tx
+        .select({ value: meta.value })
+        .from(meta)
+        .where(eq(meta.key, MCP_NEWS_CURSOR_KEY))
+        .get();
+      const cursor = Number(stored?.value);
+      const since = new Date(Date.now() - MCP_NEWS_WINDOW_MS).toISOString();
+
+      const selected = tx
+        .select({
+          id: items.id,
+          title: items.title,
+          link: items.link,
+          content: items.content,
+          published_at: items.published_at,
+          feed_title: feeds.title,
+        })
+        .from(items)
+        .innerJoin(feeds, eq(items.feed_id, feeds.id))
+        .where(
+          and(
+            Number.isSafeInteger(cursor) ? gt(items.id, cursor) : undefined,
+            gte(items.published_at, since),
+            eq(items.status, "passed"),
+            isNull(items.sim_id),
+          ),
         )
-      : undefined;
-    const cursorFilter = options.cursor === undefined
-      ? undefined
-      : gt(items.id, options.cursor);
+        .orderBy(asc(items.id))
+        .limit(MAX_LIMIT + 1)
+        .all();
 
-    const selected = db
-      .select({
-        id: items.id,
-        feed_id: items.feed_id,
-        guid: items.guid,
-        title: items.title,
-        link: items.link,
-        source: items.source,
-        content: items.content,
-        cover: items.cover,
-        published_at: items.published_at,
-        is_read: items.is_read,
-        created_at: items.created_at,
-        feed_title: feeds.title,
-      })
-      .from(items)
-      .innerJoin(feeds, eq(items.feed_id, feeds.id))
-      .where(and(timeFilter, cursorFilter, eq(items.status, "passed")))
-      .orderBy(asc(items.id))
-      .limit(requestedLimit + 1)
-      .all();
+      const hasMore = selected.length > MAX_LIMIT;
+      const taken = selected.slice(0, MAX_LIMIT);
+      const last = taken.at(-1);
+      if (last) {
+        const value = String(last.id);
+        tx.insert(meta)
+          .values({ key: MCP_NEWS_CURSOR_KEY, value })
+          .onConflictDoUpdate({ target: meta.key, set: { value } })
+          .run();
+      }
 
-    const hasMore = selected.length > requestedLimit;
-    const taken = withoutGenericCovers(selected.slice(0, requestedLimit)).map((item) => ({
-      ...item,
-      created_at: toUtcIso(item.created_at),
-    }));
-
-    return { items: taken, hasMore };
+      return { items: taken, hasMore };
+    });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Failed to get MCP items: ${detail}`);
+    throw new Error(`Failed to take uningested items: ${detail}`);
   }
 }
 

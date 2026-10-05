@@ -59,6 +59,39 @@ function matchingSource(source: string | undefined): string | null {
     : null;
 }
 
+/**
+ * Source and title-keyword checks, which need no network or LLM. Returns the
+ * rejection for a matching item, or null when the item should go on.
+ */
+export function ruleRejection(item: {
+  title: string;
+  source?: string;
+}): ItemFilterResult | null {
+  const source = matchingSource(item.source);
+  if (source) {
+    return { status: "rejected", status_reason: `Source filter: ${source}` };
+  }
+  const keyword = matchingKeyword(item.title);
+  if (keyword) {
+    return { status: "rejected", status_reason: `Keyword filter: ${keyword}` };
+  }
+  return null;
+}
+
+/** Split items into rule rejections (with their verdict) and items to keep. */
+export function partitionByRules<T extends { title: string; source?: string }>(
+  items: T[],
+): [rejected: (T & ItemFilterResult)[], kept: T[]] {
+  const rejected: (T & ItemFilterResult)[] = [];
+  const kept: T[] = [];
+  for (const item of items) {
+    const rule = ruleRejection(item);
+    if (rule) rejected.push({ ...item, ...rule });
+    else kept.push(item);
+  }
+  return [rejected, kept];
+}
+
 export async function filterItems<
   T extends { title: string; content: string | null; source?: string },
 >(items: T[]): Promise<(T & ItemFilterResult)[]> {
@@ -87,26 +120,12 @@ export async function filterItems<
   let keywordRejected = 0;
   let sourceRejected = 0;
   for (const item of items) {
-    const source = matchingSource(item.source);
-    if (source) {
+    const rule = ruleRejection(item);
+    if (rule) {
       rejected += 1;
-      sourceRejected += 1;
-      filtered.push({
-        ...item,
-        status: "rejected",
-        status_reason: `Source filter: ${source}`,
-      });
-      continue;
-    }
-    const keyword = matchingKeyword(item.title);
-    if (keyword) {
-      rejected += 1;
-      keywordRejected += 1;
-      filtered.push({
-        ...item,
-        status: "rejected",
-        status_reason: `Keyword filter: ${keyword}`,
-      });
+      if (rule.status_reason?.startsWith("Source")) sourceRejected += 1;
+      else keywordRejected += 1;
+      filtered.push({ ...item, ...rule });
       continue;
     }
     const verdict = await applyItemFilter(item.title, item.content);

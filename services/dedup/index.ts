@@ -1,10 +1,10 @@
 import { getDedupState, getTokenizerState, type DedupConfig } from "../../config";
-import { addItems, getDedupCandidates } from "../../db/items";
+import { addItems, getDedupCandidates, getDedupNews } from "../../db/items";
 import { TimeUnit } from "../../db/utils";
 import { splitTokens, tokensSimilarity } from "../../utils/similarity";
 import { titleTokens } from "../../utils/text";
 import { getAiConfig } from "../ai/client";
-import { applyAiDedup } from "./ai";
+import { applyAiDedup, MAX_CONTENT_CHARS } from "./ai";
 
 type NewItem = Parameters<typeof addItems>[1][number];
 
@@ -22,10 +22,10 @@ async function findDuplicateIds(
   const tokenSet = new Set(tokens);
 
   const ranked = getDedupCandidates(item.published_at, settings.windowDays * TimeUnit.DAY)
-    .map((candidate) => ({ candidate, candidateTokens: splitTokens(candidate.title_tokens) }))
+    .map(({ id, title_tokens }) => ({ id, candidateTokens: splitTokens(title_tokens) }))
     .filter(({ candidateTokens }) => candidateTokens.some((token) => tokenSet.has(token)))
-    .map(({ candidate, candidateTokens }) => ({
-      candidate,
+    .map(({ id, candidateTokens }) => ({
+      id,
       similarity: tokensSimilarity(tokens, candidateTokens),
     }))
     .filter(({ similarity }) => similarity > settings.minSimilarity)
@@ -33,8 +33,17 @@ async function findDuplicateIds(
     .slice(0, settings.maxCandidates);
   if (ranked.length === 0) return [];
 
-  const confirmed = await applyAiDedup(item, ranked.map(({ candidate }) => candidate));
-  const ids = confirmed.map((index) => ranked[index]!.candidate.id);
+  // Load text only for the top candidates, in rank order. The raw prefix is
+  // twice the prompt budget since whitespace is collapsed before truncation.
+  const newsById = new Map(
+    getDedupNews(ranked.map(({ id }) => id), MAX_CONTENT_CHARS * 2)
+      .map((news) => [news.id, news]),
+  );
+  const candidates = ranked.flatMap(({ id }) => newsById.get(id) ?? []);
+  if (candidates.length === 0) return [];
+
+  const confirmed = await applyAiDedup(item, candidates);
+  const ids = confirmed.map((index) => candidates[index]!.id);
   console.log(
     `[dedup] "${item.title.slice(0, 40)}" candidates=${ranked.map(({ similarity }) => similarity.toFixed(2)).join(",")} duplicates=${ids.join(",") || "none"}`,
   );

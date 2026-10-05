@@ -15,6 +15,13 @@ export function resolvePort(): number {
   return port;
 }
 
+export const DEFAULT_HOST = "0.0.0.0";
+
+/** Listen address; `127.0.0.1` keeps NanoFlux reachable only from this machine. */
+export function resolveHost(): string {
+  return Bun.env.HOST?.trim() || DEFAULT_HOST;
+}
+
 export function resolveAdminPassword(): string {
   const fromFile = readLiteralEnvValue("ADMIN_PASSWORD");
   if (fromFile !== undefined) return fromFile.trim();

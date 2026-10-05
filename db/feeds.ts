@@ -297,6 +297,8 @@ export function updateFeedFetchState(
     last_published_at?: string;
     last_build_date?: string | null;
     last_guids?: string;
+    http_etag?: string | null;
+    http_last_modified?: string | null;
   },
 ): void {
 
@@ -306,6 +308,8 @@ export function updateFeedFetchState(
       .set({
         next_fetched_at: input.next_fetched_at,
         fetch_interval_min: input.fetch_interval_min,
+        fetch_failures: 0,
+        last_error: null,
         ...(input.last_published_at !== undefined
           ? { last_published_at: input.last_published_at }
           : {}),
@@ -315,6 +319,12 @@ export function updateFeedFetchState(
         ...(input.last_guids !== undefined
           ? { last_guids: input.last_guids }
           : {}),
+        ...(input.http_etag !== undefined
+          ? { http_etag: input.http_etag }
+          : {}),
+        ...(input.http_last_modified !== undefined
+          ? { http_last_modified: input.http_last_modified }
+          : {}),
       })
       .where(eq(feeds.id, id))
     .run();
@@ -322,6 +332,26 @@ export function updateFeedFetchState(
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Failed to update feed fetch state: ${detail}`);
+  }
+}
+
+/** Push a failed feed back in the queue so it cannot hold the head of `getDueFeeds`. */
+export function recordFeedFetchFailure(
+  id: number,
+  input: {
+    next_fetched_at: string;
+    fetch_failures: number;
+    last_error: string;
+  },
+): void {
+  try {
+    db.update(feeds)
+      .set(input)
+      .where(eq(feeds.id, id))
+      .run();
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to record feed fetch failure: ${detail}`);
   }
 }
 
