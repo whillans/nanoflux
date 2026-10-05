@@ -5,16 +5,7 @@ import {
   getMcpState,
   updateMcpState,
 } from "../config";
-
-function isLoopbackHost(hostname: string): boolean {
-  const normalized = hostname.toLowerCase();
-  return (
-    normalized === "localhost" ||
-    normalized === "127.0.0.1" ||
-    normalized === "::1" ||
-    normalized === "[::1]"
-  );
-}
+import { isLoopbackHost } from "../shared/env";
 
 function getNetworkIp(): string {
   const addresses = Object.values(networkInterfaces())
@@ -35,7 +26,7 @@ async function resolveMcpEndpoint(request: Request): Promise<string> {
 
   const networkIp = getNetworkIp();
   const port = url.port ? `:${url.port}` : "";
-  return `http://${networkIp}${port}/mcp`;
+  return `${url.protocol}//${networkIp}${port}/mcp`;
 }
 
 function publicMcpConfig() {

@@ -1,7 +1,15 @@
 import { join } from "node:path";
 import { Elysia } from "elysia";
-import { requireAdminPassword, resolveHost, resolvePort } from "./shared/env";
+import {
+  isLoopbackHost,
+  requireAdminPassword,
+  resolveHost,
+  resolvePort,
+  resolveTls,
+  type TlsFiles,
+} from "./shared/env";
 import { withMcpAccess } from "./shared/mcp-access";
+import { applySecurityHeaders } from "./shared/security-headers";
 import { createAuthRoutes, withAdminAuth } from "./api/auth";
 import { buildWebManifest } from "./shared/manifest";
 import { DEFAULT_LOCALE, parseLocale, type Locale } from "./shared/locale";
@@ -124,6 +132,7 @@ async function feverGet(ctx: {
   request: Request;
   query: Record<string, string | undefined>;
   set: { status?: number | string; headers: Record<string, unknown> };
+  server?: { requestIP(request: Request): { address: string } | null } | null;
 }) {
   if (!isFeverApiQuery(ctx.query)) {
     return indexHtml();
@@ -136,6 +145,7 @@ async function feverPost(ctx: {
   query: Record<string, string | undefined>;
   body?: unknown;
   set: { status?: number | string; headers: Record<string, unknown> };
+  server?: { requestIP(request: Request): { address: string } | null } | null;
 }) {
   return handleFeverRequest(ctx);
 }
@@ -181,11 +191,28 @@ const publicRoutes = new Elysia()
   .use(createAuthRoutes(adminAuth))
   .use(protectedBackendRoutes);
 
-const app = new Elysia().use(publicRoutes);
+const app = new Elysia().onRequest(applySecurityHeaders).use(publicRoutes);
 
 const port = resolvePort();
+let tlsFiles: TlsFiles | null;
 try {
-  app.listen({ port, hostname: BIND_HOST });
+  tlsFiles = resolveTls();
+} catch (error) {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`[listen] ${message}`);
+  process.exit(1);
+}
+try {
+  app.listen({
+    port,
+    hostname: BIND_HOST,
+    ...(tlsFiles && {
+      tls: {
+        cert: Bun.file(tlsFiles.certFile),
+        key: Bun.file(tlsFiles.keyFile),
+      },
+    }),
+  });
 } catch (error) {
   const message = error instanceof Error ? error.message : String(error);
   console.error(
@@ -200,8 +227,13 @@ if (!app.server) {
 }
 
 console.log(
-  `Listening on http://${BIND_HOST}:${app.server.port}/ (operator UI/REST require ADMIN_PASSWORD; MCP: local-only unless remote access is enabled in Settings)`,
+  `Listening on ${tlsFiles ? "https" : "http"}://${BIND_HOST}:${app.server.port}/ (operator UI/REST require ADMIN_PASSWORD; MCP: local-only unless remote access is enabled in Settings)`,
 );
+if (!tlsFiles && !isLoopbackHost(BIND_HOST)) {
+  console.warn(
+    `[listen] HOST=${BIND_HOST} accepts connections from other machines over plain HTTP: the admin password, session cookie, and MCP token travel unencrypted. Set TLS_CERT_FILE and TLS_KEY_FILE to serve HTTPS, put an HTTPS reverse proxy in front, or unset HOST to listen on 127.0.0.1 only.`,
+  );
+}
 
 // Start cron only after we own the listen port, so a failed bind cannot leave
 // orphan fetchers writing to the same SQLite database.

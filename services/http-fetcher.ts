@@ -40,9 +40,13 @@ for (const [network, prefix] of [
   BLOCKED_ADDRESSES.addSubnet(network, prefix, "ipv4");
 }
 for (const [network, prefix] of [
-  ["::", 128],
-  ["::1", 128],
+  // Unspecified, loopback and deprecated IPv4-compatible (::a.b.c.d).
+  ["::", 96],
+  // Local-use NAT64 and 6to4: both embed an IPv4 address that a translator
+  // or relay could route to an internal host.
+  ["64:ff9b:1::", 48],
   ["100::", 64],
+  ["2002::", 16],
   ["2001:db8::", 32],
   ["fc00::", 7],
   ["fe80::", 10],
@@ -84,17 +88,25 @@ function allowedPrivateHosts(): Set<string> {
 
 export class BlockedUrlError extends Error {}
 
+function bareHostname(url: URL): string {
+  return url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+}
+
 /**
- * Reject URLs that are not http(s) or whose host resolves to a non-public
+ * Resolve a URL's host to the addresses a request may connect to, IPv4 first.
+ * Rejects URLs that are not http(s) or whose host resolves to a non-public
  * address. Every resolved address must be public, so a DNS answer mixing
- * public and private records cannot slip through.
+ * public and private records cannot slip through. Returns null for hosts
+ * exempted by `FETCH_ALLOW_PRIVATE_HOSTS`.
  */
-export async function assertPublicUrl(url: URL): Promise<void> {
+export async function resolvePublicAddresses(
+  url: URL,
+): Promise<string[] | null> {
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw new BlockedUrlError(`Blocked URL scheme: ${url.protocol}`);
   }
-  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "");
-  if (allowedPrivateHosts().has(host)) return;
+  const host = bareHostname(url);
+  if (allowedPrivateHosts().has(host)) return null;
 
   const addresses = isIP(host)
     ? [host]
@@ -107,13 +119,91 @@ export async function assertPublicUrl(url: URL): Promise<void> {
       `Blocked non-public address for ${host}: ${blocked}`,
     );
   }
+  return addresses.sort((a, b) => isIP(a) - isIP(b));
+}
+
+/**
+ * GET `url` by connecting to `address` instead of resolving the host again.
+ * The URL carries the IP, so neither the runtime nor an HTTP(S) proxy gets to
+ * re-resolve the name; the original host travels in the Host header and, for
+ * HTTPS, as the TLS server name the certificate is verified against.
+ */
+async function pinnedGet(
+  url: URL,
+  address: string,
+  init: UndiciRequestInit,
+): Promise<Response> {
+  const pinned = new URL(url.href);
+  pinned.hostname = isIP(address) === 6 ? `[${address}]` : address;
+  const headers = new Headers(init.headers as HeadersInit);
+  headers.set("Host", url.host);
+  return httpRequest(pinned.href, {
+    ...init,
+    headers,
+    method: "GET",
+    redirect: "manual",
+    ...(url.protocol === "https:" && {
+      tls: { serverName: bareHostname(url) },
+    }),
+  } as unknown as UndiciRequestInit);
+}
+
+/** Whether the runtime will send `url` through `HTTP_PROXY` / `HTTPS_PROXY`. */
+function usesEnvProxy(url: URL): boolean {
+  const env = process.env;
+  const proxy =
+    url.protocol === "https:"
+      ? (env.HTTPS_PROXY ?? env.https_proxy)
+      : (env.HTTP_PROXY ?? env.http_proxy);
+  if (!proxy) return false;
+  const host = bareHostname(url);
+  return !(env.NO_PROXY ?? env.no_proxy ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase().replace(/^\*?\./, ""))
+    .filter(Boolean)
+    .some(
+      (entry) => entry === "*" || host === entry || host.endsWith(`.${entry}`),
+    );
+}
+
+/**
+ * `FETCH_PROXY_RESOLVES_DNS=true` leaves name resolution to the outbound
+ * proxy, for networks where local DNS answers are unusable. The proxy's
+ * answer cannot be checked from here, so the address check is then only
+ * advisory for proxied requests.
+ */
+function proxyResolvesDns(url: URL): boolean {
+  return process.env.FETCH_PROXY_RESOLVES_DNS === "true" && usesEnvProxy(url);
+}
+
+async function checkedGet(
+  url: URL,
+  init: UndiciRequestInit,
+): Promise<Response> {
+  const addresses = await resolvePublicAddresses(url);
+  // Exempt hosts and IP literals involve no lookup that could change.
+  if (!addresses || isIP(bareHostname(url)) || proxyResolvesDns(url)) {
+    return httpRequest(url.href, { ...init, method: "GET", redirect: "manual" });
+  }
+  let lastError: unknown;
+  for (const address of addresses) {
+    try {
+      return await pinnedGet(url, address, init);
+    } catch (error) {
+      lastError = error;
+      if (init.signal?.aborted) break;
+    }
+  }
+  throw lastError;
 }
 
 const MAX_REDIRECTS = 5;
 
 /**
  * GET a URL taken from untrusted content (feeds, articles, covers). Each hop,
- * including redirects, is resolved and checked before the request is sent.
+ * including redirects, is resolved once, checked, and then requested at the
+ * checked address, so a DNS answer that changes after the check (rebinding)
+ * cannot redirect the connection to an internal host.
  */
 export async function publicHttpGet(
   url: string,
@@ -121,12 +211,7 @@ export async function publicHttpGet(
 ): Promise<Response> {
   let current = new URL(url);
   for (let hop = 0; ; hop++) {
-    await assertPublicUrl(current);
-    const response = await httpRequest(current.href, {
-      ...init,
-      method: "GET",
-      redirect: "manual",
-    });
+    const response = await checkedGet(current, init);
     const location = response.headers.get("location");
     if (response.status < 300 || response.status >= 400 || !location) {
       return response;

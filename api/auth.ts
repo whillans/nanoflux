@@ -1,12 +1,15 @@
 import { Elysia, t, type AnyElysia } from "elysia";
 import {
-  consumeLoginAttempt,
+  authenticateRequest,
+  checkCredential,
   createSessionToken,
-  isRequestAuthenticated,
   isSecureRequest,
   passwordsEqual,
+  readSessionCookie,
+  revokeSessionToken,
   sessionCookieHeader,
 } from "../shared/admin-auth";
+import { clientAddress } from "../shared/localhost-only";
 
 export type AdminAuthOptions = {
   required: boolean;
@@ -16,8 +19,14 @@ export type AdminAuthOptions = {
 export function withAdminAuth(routes: AnyElysia, options: AdminAuthOptions) {
   if (!options.required) return routes;
   return new Elysia()
-    .onBeforeHandle(({ request, set }) => {
-      if (isRequestAuthenticated(request, options.password)) return;
+    .onBeforeHandle(({ request, server, set }) => {
+      const client = clientAddress(request, server?.requestIP(request)?.address);
+      const result = authenticateRequest(request, options.password, client);
+      if (result === "ok") return;
+      if (result === "blocked") {
+        set.status = 429;
+        return { code: 429, message: "Too many failed attempts" };
+      }
       set.status = 401;
       return { code: 401, message: "Unauthorized" };
     })
@@ -26,16 +35,18 @@ export function withAdminAuth(routes: AnyElysia, options: AdminAuthOptions) {
 
 export function createAuthRoutes(options: AdminAuthOptions) {
   return new Elysia({ prefix: "/api/auth" })
-    .get("/status", ({ request }) => {
+    .get("/status", ({ request, server }) => {
       if (!options.required) {
         return { code: 0, message: "ok", data: { required: false, authenticated: true } };
       }
+      const client = clientAddress(request, server?.requestIP(request)?.address);
       return {
         code: 0,
         message: "ok",
         data: {
           required: true,
-          authenticated: isRequestAuthenticated(request, options.password),
+          authenticated:
+            authenticateRequest(request, options.password, client) === "ok",
         },
       };
     })
@@ -46,20 +57,24 @@ export function createAuthRoutes(options: AdminAuthOptions) {
           return { code: 0, message: "ok", data: { required: false, authenticated: true } };
         }
 
-        const ip = server?.requestIP(request)?.address ?? "unknown";
-        if (!consumeLoginAttempt(ip)) {
+        const client = clientAddress(request, server?.requestIP(request)?.address);
+        const password = typeof body?.password === "string" ? body.password : "";
+        const result = checkCredential(
+          "admin",
+          client,
+          passwordsEqual(password, options.password),
+        );
+        if (result === "blocked") {
           set.status = 429;
           return { code: 429, message: "Too many login attempts" };
         }
-
-        const password = typeof body?.password === "string" ? body.password : "";
-        if (!passwordsEqual(password, options.password)) {
+        if (result !== "ok") {
           set.status = 401;
           return { code: 401, message: "Invalid password" };
         }
 
         set.headers["set-cookie"] = sessionCookieHeader(
-          createSessionToken(options.password),
+          createSessionToken(),
           isSecureRequest(request),
         );
         return { code: 0, message: "ok", data: { required: true, authenticated: true } };
@@ -71,6 +86,7 @@ export function createAuthRoutes(options: AdminAuthOptions) {
       },
     )
     .post("/logout", ({ request, set }) => {
+      revokeSessionToken(readSessionCookie(request));
       set.headers["set-cookie"] = sessionCookieHeader(null, isSecureRequest(request));
       return {
         code: 0,

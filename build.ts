@@ -43,6 +43,7 @@ const swResult = await Bun.build({
   define: {
     BUILD_PRECACHE: JSON.stringify([
       `/assets/${jsName}`,
+      "/assets/prefs-init.js",
       "/assets/app.css",
     ]),
   },
@@ -60,8 +61,8 @@ if (swOut) {
 
 await cp(staticDir, publicDir, { recursive: true });
 
-const prefsInitScript = `<script>
-(function () {
+// Served as a file, not inlined: the page's CSP allows no inline script.
+const prefsInitScript = `(function () {
   try {
     var l = localStorage.getItem("nanoflux-locale");
     var loc;
@@ -91,7 +92,8 @@ const prefsInitScript = `<script>
       document.documentElement.classList.add("font-small");
   } catch (e) {}
 })();
-</script>`;
+`;
+await writeFile(path.join(assetsDir, "prefs-init.js"), prefsInitScript);
 
 await writeFile(
   path.join(publicDir, "index.html"),
@@ -111,7 +113,7 @@ await writeFile(
     <link rel="manifest" href="/manifest.webmanifest?locale=zh-Hans" />
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-    ${prefsInitScript}
+    <script src="/assets/prefs-init.js"></script>
     <link rel="stylesheet" href="/assets/app.css" />
     <script type="module" crossorigin src="/assets/${jsName}"></script>
   </head>
