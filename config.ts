@@ -3,7 +3,6 @@ import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { passwordStrengthError } from "./shared/password-strength";
-import { DEFAULT_TRANSLATE_PROMPT } from "./shared/translate";
 
 export const TRANSLATE_TARGET_LANGS = ["en", "zh-Hans", "zh-Hant"] as const;
 export type TranslateTargetLang = (typeof TRANSLATE_TARGET_LANGS)[number];
@@ -17,7 +16,6 @@ export type FilterConfig = {
 };
 
 export type TranslateConfig = {
-  prompt: string;
   enabled: boolean;
   targetLang: TranslateTargetLang;
 };
@@ -131,7 +129,6 @@ const FilterSchema = z.object({
 });
 
 const TranslateSchema = z.object({
-  prompt: z.string().default(""),
   enabled: z.boolean().default(false),
   targetLang: z.enum(TRANSLATE_TARGET_LANGS).default(DEFAULT_TRANSLATE_TARGET_LANG),
 });
@@ -320,18 +317,11 @@ export async function updateFilterState(partial: {
 }
 
 export async function updateTranslateState(partial: {
-  prompt?: string;
   enabled?: boolean;
   targetLang?: TranslateConfig["targetLang"];
 }): Promise<TranslateConfig> {
-  if (typeof partial.prompt === "string") {
-    config.translate.prompt = partial.prompt;
-  }
   if (typeof partial.enabled === "boolean") {
     config.translate.enabled = partial.enabled;
-  }
-  if (config.translate.enabled && !config.translate.prompt.trim()) {
-    config.translate.prompt = DEFAULT_TRANSLATE_PROMPT;
   }
   const nextLang = parseTranslateTargetLang(partial.targetLang);
   if (nextLang) {

@@ -30,7 +30,6 @@ export function isTranslateEnabled(): boolean {
 }
 
 export async function updateTranslateConfig(partial: {
-  prompt?: string;
   enabled?: boolean;
   targetLang?: TranslateTargetLang;
 }): Promise<TranslateConfig> {

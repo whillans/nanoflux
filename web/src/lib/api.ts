@@ -437,7 +437,6 @@ function parseTranslateTargetLang(
 }
 
 export type TranslateConfig = {
-  prompt: string;
   enabled: boolean;
   targetLang: TranslateTargetLang;
 };
@@ -452,14 +451,11 @@ function normalizeTranslateConfig(
   data: Partial<TranslateConfig> | undefined,
   defaults?: Partial<TranslateConfig>,
 ): TranslateConfig {
-  const prompt =
-    typeof data?.prompt === "string" ? data.prompt : (defaults?.prompt ?? "");
   const targetLang: TranslateTargetLang =
     parseTranslateTargetLang(data?.targetLang) ??
     parseTranslateTargetLang(defaults?.targetLang) ??
     "zh-Hans";
   return {
-    prompt,
     enabled:
       typeof data?.enabled === "boolean"
         ? data.enabled
@@ -480,7 +476,6 @@ export async function fetchTranslate(): Promise<TranslateConfig> {
 }
 
 export function updateTranslate(payload: {
-  prompt?: string;
   enabled?: boolean;
   targetLang?: TranslateTargetLang;
 }) {
