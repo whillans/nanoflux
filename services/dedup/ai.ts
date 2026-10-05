@@ -1,7 +1,9 @@
-import { z } from "zod";
-import { chatCompletionJson, getAiConfig } from "../ai/client";
+import { noul, type NoulQuestion } from "system-one-adapter";
+import { getAiConfig, systemOne } from "../ai/client";
 
 export const MAX_CONTENT_CHARS = 300;
+/** Probability of reporting the same news above which a candidate is a duplicate. */
+const DUPLICATE_THRESHOLD = 0.5;
 
 export type DedupNews = {
   title: string;
@@ -9,26 +11,13 @@ export type DedupNews = {
   published_at: string;
 };
 
-function describe(news: DedupNews): string {
+function describe(news: DedupNews) {
   const snippet = (news.content ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_CONTENT_CHARS);
-  return [
-    `Title: ${news.title}`,
-    `Published: ${news.published_at}`,
-    `Summary: ${snippet || "(empty)"}`,
-  ].join("\n");
-}
-
-const DuplicatesSchema = z.object({
-  duplicates: z.array(z.number()),
-});
-
-/** Keep 1-based candidate numbers that are integers within range, deduplicated. */
-function normalizeDuplicates(values: number[], count: number): number[] {
-  return [
-    ...new Set(
-      values.filter((value) => Number.isInteger(value) && value >= 1 && value <= count),
-    ),
-  ];
+  return {
+    title: news.title,
+    published: news.published_at,
+    summary: snippet || "(empty)",
+  };
 }
 
 /**
@@ -41,24 +30,31 @@ export async function applyAiDedup(
 ): Promise<number[]> {
   if (candidates.length === 0 || !getAiConfig()) return [];
 
-  const userMessage = [
-    "New news:",
-    describe(news),
-    "",
-    "Candidates:",
-    ...candidates.map((candidate, index) => `[${index + 1}]\n${describe(candidate)}`),
-  ].join("\n");
+  // One yes/no question per candidate, keyed like the candidate in the state.
+  const labels = candidates.map((_, index) => `candidate_${index + 1}`);
+  const questions: Record<string, NoulQuestion> = {};
+  const candidateState: Record<string, ReturnType<typeof describe>> = {};
+  candidates.forEach((candidate, index) => {
+    const label = labels[index]!;
+    candidateState[label] = describe(candidate);
+    questions[label] = noul(
+      `Does ${label} report the same event or story as new_news, ` +
+        "even if worded differently, translated, or from another outlet?",
+      {
+        true: "Reports the same event or story.",
+        false: "Unrelated, or related but about a different event.",
+      },
+    );
+  });
 
   try {
-    const { duplicates } = await chatCompletionJson(
-      "You are a news deduplicator. A candidate is a duplicate when it reports the same event or story as the new news, " +
-        "even if worded differently, translated, or from another outlet. Related but different events are not duplicates. " +
-        'Reply with JSON only: {"duplicates": number[]} listing the candidate numbers that are duplicates (empty when none).',
-      userMessage,
-      DuplicatesSchema,
-      "news_dedup_verdict",
+    const answers = await systemOne(
+      { new_news: describe(news), candidates: candidateState },
+      questions,
     );
-    return normalizeDuplicates(duplicates, candidates.length).map((value) => value - 1);
+    return labels
+      .map((_, index) => index)
+      .filter((index) => (answers[labels[index]!]?.noul ?? 0) > DUPLICATE_THRESHOLD);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[ai-dedup] ${message}`);

@@ -1,17 +1,14 @@
-import { z } from "zod";
-import { chatCompletionJson, getAiConfig } from "../ai/client";
+import { noul } from "system-one-adapter";
+import { getAiConfig, systemOne } from "../ai/client";
 
 const MAX_CONTENT_CHARS = 3000;
+/** Probability that the news matches the criteria, at or above which it is kept. */
+const PASS_THRESHOLD = 0.5;
 
 type AiFilterResult = {
   passed: boolean;
   reason: string | null;
 };
-
-const VerdictSchema = z.object({
-  pass: z.boolean(),
-  reason: z.string(),
-});
 
 /** Fail-open: keep the item when LLM is unavailable or unparseable. */
 function passThrough(): AiFilterResult {
@@ -36,27 +33,21 @@ export async function applyAiFilter(
   }
 
   const bodyContent = (content ?? "").slice(0, MAX_CONTENT_CHARS);
-  const userMessage = [
-    "Criteria:",
-    trimmedPrompt,
-    "",
-    `Title: ${title}`,
-    "",
-    "Content:",
-    bodyContent || "(empty)",
-  ].join("\n");
 
   try {
-    const verdict = await chatCompletionJson(
-      'You are a news relevance filter. Decide whether the news matches the user criteria. Reply with JSON only: {"pass": boolean, "reason": string}.',
-      userMessage,
-      VerdictSchema,
-      "news_filter_verdict",
+    const { pass } = await systemOne(
+      { title, content: bodyContent || "(empty)" },
+      {
+        pass: noul(
+          ["Does the news match the user criteria?", "", "Criteria:", trimmedPrompt].join("\n"),
+        ),
+      },
     );
 
+    const passed = pass.noul >= PASS_THRESHOLD;
     return {
-      passed: verdict.pass,
-      reason: verdict.reason.trim() || null,
+      passed,
+      reason: passed ? null : `AI filter: match probability ${pass.noul.toFixed(2)}`,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
