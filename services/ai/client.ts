@@ -1,6 +1,11 @@
 import { HumanMessage, SystemMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
-import { z } from "zod";
+import {
+  OpenAIProvider,
+  type Questions,
+  SystemOneAdapterClient,
+  type SystemOneResponse,
+} from "system-one-adapter";
 
 const AI_TIMEOUT_MS = 30_000;
 
@@ -92,6 +97,16 @@ export async function chatCompletion(
   return text;
 }
 
+/** The adapter's OpenAI client has no timeout option; bound each request here. */
+const fetchWithTimeout = ((input, init) =>
+  fetch(input, {
+    ...init,
+    signal: AbortSignal.any([
+      ...(init?.signal ? [init.signal] : []),
+      AbortSignal.timeout(AI_TIMEOUT_MS),
+    ]),
+  })) as typeof fetch;
+
 /**
  * Whether the configured provider accepts `response_format: json_schema`,
  * keyed by base URL + model. Unknown until the first structured call.
@@ -106,70 +121,69 @@ function isResponseFormatUnsupported(error: unknown): boolean {
   return /response_format|json_schema/i.test(error.message);
 }
 
+const systemOneProviders = new Map<string, OpenAIProvider>();
+
+function getSystemOneProvider(config: AiConfig): OpenAIProvider {
+  const key = `${config.baseUrl}|${config.model}|${config.apiKey}`;
+  let provider = systemOneProviders.get(key);
+  if (!provider) {
+    provider = new OpenAIProvider(config.model, {
+      baseUrl: `${config.baseUrl}/v1`,
+      apiKey: config.apiKey,
+      // Prefer chat completions for OpenAI-compatible providers.
+      api: "chat_completions",
+      fetch: fetchWithTimeout,
+    });
+    systemOneProviders.set(key, provider);
+  }
+  return provider;
+}
+
+function createSystemOneClient(structuredOutputs: boolean): SystemOneAdapterClient {
+  return new SystemOneAdapterClient({
+    structuredOutputs,
+    llmAnswerMode: "probabilities",
+    normalizeProbabilities: true,
+    nRetryMalformedStructure: 1,
+    retry: { maxRetries: 1 },
+  });
+}
+
+/** Strict `json_schema` output, and JSON prompted in the system message. */
+const structuredClient = createSystemOneClient(true);
+const promptedClient = createSystemOneClient(false);
+
 /**
- * Chat completion whose reply is validated against `schema`.
- * Uses strict `json_schema` output where supported and falls back to
- * `json_object` (valid JSON, schema enforced only by zod) where it is not.
+ * Evaluate typed questions (`noul`, `choice`, `score`) against `state` with
+ * the configured LLM, System One style: the model only answers the questions,
+ * each with a probability. Uses strict `json_schema` output where supported
+ * and falls back to prompted JSON (validated by the adapter) where it is not.
  */
-export async function chatCompletionJson<T>(
-  system: string,
-  user: string,
-  schema: z.ZodType<T>,
-  name: string,
-  options?: { temperature?: number },
-): Promise<T> {
+export async function systemOne<Q extends Questions>(
+  state: unknown,
+  questions: Q,
+): Promise<SystemOneResponse<Q>["answers"]> {
   const config = getAiConfig();
   if (!config) {
     throw new Error("AI is not configured");
   }
 
-  const model = createChatModel(config, options);
-  const messages = [new SystemMessage(system), new HumanMessage(user)];
+  const request = { state, questions, model: getSystemOneProvider(config) };
   const supportKey = `${config.baseUrl}|${config.model}`;
 
-  const invokeJsonObject = () =>
-    model.invoke(messages, { response_format: { type: "json_object" } });
-
-  let response;
-  if (jsonSchemaSupport.get(supportKey) === false) {
-    response = await invokeJsonObject();
-  } else {
-    const { $schema: _, ...jsonSchema } = z.toJSONSchema(schema);
+  if (jsonSchemaSupport.get(supportKey) !== false) {
     try {
-      response = await model.invoke(messages, {
-        // json_schema goes through the SDK's `parse`, so malformed output
-        // throws inside LangChain's retry loop; cap it at one retry.
-        maxRetries: 1,
-        response_format: {
-          type: "json_schema",
-          json_schema: { name, strict: true, schema: jsonSchema },
-        },
-      });
+      const response = await structuredClient.systemOne(request);
       jsonSchemaSupport.set(supportKey, true);
+      return response.answers;
     } catch (error) {
       if (!isResponseFormatUnsupported(error)) throw error;
       jsonSchemaSupport.set(supportKey, false);
       console.warn(
-        `[ai] ${config.model} rejects json_schema output; falling back to json_object`,
+        `[ai] ${config.model} rejects json_schema output; falling back to prompted JSON`,
       );
-      response = await invokeJsonObject();
     }
   }
 
-  const text = textFromContent(response.content);
-  if (!text) throw new Error("Empty AI response");
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error(`AI response is not JSON: ${text.slice(0, 100)}`);
-  }
-  const result = schema.safeParse(parsed);
-  if (!result.success) {
-    throw new Error(
-      `AI response does not match schema: ${result.error.message.slice(0, 200)}`,
-    );
-  }
-  return result.data;
+  return (await promptedClient.systemOne(request)).answers;
 }
