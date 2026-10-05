@@ -1,3 +1,4 @@
+import { optimizeDatabase, reclaimStorage } from "../db/database";
 import { clearItems } from "../db/items";
 import { fetchDueFeeds } from "./feeds/fetcher";
 
@@ -21,6 +22,10 @@ export async function startScheduler() {
     try {
       clearItems();
       console.log("[cleanup:cron] Removed items older than 90 days");
+      reclaimStorage();
+      console.log("[cleanup:cron] Reclaimed free pages and truncated WAL");
+      optimizeDatabase();
+      console.log("[cleanup:cron] Refreshed query planner statistics");
     } catch (error) {
       console.error("[cleanup:cron]", error);
     }

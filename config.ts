@@ -1,6 +1,7 @@
-import { readFile, writeFile } from "fs/promises";
+import { open, readFile, rename, rm } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
-import { resolve } from "path";
+import { resolve } from "node:path";
+import { z } from "zod";
 import { passwordStrengthError } from "./shared/password-strength";
 import { DEFAULT_TRANSLATE_PROMPT } from "./shared/translate";
 
@@ -66,10 +67,6 @@ export function parseTranslateTargetLang(
 }
 
 const CONFIG_PATH = resolve(process.cwd(), "config.json");
-const LEGACY_FILTER_PATH = resolve(process.cwd(), "filter.json");
-const LEGACY_FILTERS_PATH = resolve(process.cwd(), "filters.json");
-const LEGACY_TRANSLATE_PATH = resolve(process.cwd(), "translate.json");
-const LEGACY_FEVER_PATH = resolve(process.cwd(), "fever.json");
 
 export type AppConfig = {
   filter: FilterConfig;
@@ -80,69 +77,12 @@ export type AppConfig = {
   tokenizer: TokenizerConfig;
 };
 
-const DEFAULT_FILTER: FilterConfig = {
-  prompt: "",
-  enabled: false,
-  keywords: "",
-  sources: [],
-};
-const DEFAULT_TRANSLATE: TranslateConfig = {
-  prompt: "",
-  enabled: false,
-  targetLang: DEFAULT_TRANSLATE_TARGET_LANG,
-};
-const DEFAULT_DEDUP: DedupConfig = {
-  enabled: true,
-  windowDays: 3,
-  minSimilarity: 0.6,
-  maxCandidates: 5,
-};
-const DEFAULT_FEVER: FeverConfig = {
-  enabled: false,
-  user: "",
-  password: "",
-};
-const DEFAULT_MCP: McpConfig = {
-  remoteAccess: false,
-  authorization: "",
-};
-const DEFAULT_TOKENIZER: TokenizerConfig = {
-  stopwords: [
-    "的", "了", "是", "在", "和", "与", "及", "或", "等", "也", "都", "就",
-    "被", "把", "将", "对", "从", "为", "于", "以", "之", "其", "这", "那",
-    "a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is",
-    "are", "was", "were", "be", "at", "by", "with", "as", "from", "it",
-  ],
-};
-
-let loaded = false;
-let config: AppConfig = {
-  filter: { ...DEFAULT_FILTER },
-  translate: { ...DEFAULT_TRANSLATE },
-  dedup: { ...DEFAULT_DEDUP },
-  fever: { ...DEFAULT_FEVER },
-  mcp: { ...DEFAULT_MCP },
-  tokenizer: { ...DEFAULT_TOKENIZER },
-};
-let writeLock: Promise<void> = Promise.resolve();
-
-function cloneConfig(value: AppConfig): AppConfig {
-  return {
-    filter: { ...value.filter },
-    translate: { ...value.translate },
-    dedup: { ...value.dedup },
-    fever: { ...value.fever },
-    mcp: { ...value.mcp },
-    tokenizer: { stopwords: [...value.tokenizer.stopwords] },
-  };
-}
-
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
+const DEFAULT_STOPWORDS = [
+  "的", "了", "是", "在", "和", "与", "及", "或", "等", "也", "都", "就",
+  "被", "把", "将", "对", "从", "为", "于", "以", "之", "其", "这", "那",
+  "a", "an", "the", "of", "to", "in", "on", "for", "and", "or", "is",
+  "are", "was", "were", "be", "at", "by", "with", "as", "from", "it",
+];
 
 function normalizeFilterSource(source: string): string {
   const trimmed = source.trim().toLocaleLowerCase();
@@ -154,174 +94,139 @@ function normalizeFilterSource(source: string): string {
   }
 }
 
-export function parseFilterConfig(parsed: unknown): {
-  config: FilterConfig;
-  needsPersist: boolean;
-} {
-  if (Array.isArray(parsed)) {
-    for (const entry of parsed) {
-      if (entry && typeof entry === "object" && "prompt" in entry) {
-        const prompt = typeof entry.prompt === "string" ? entry.prompt : "";
-        if (prompt.trim()) {
-          return {
-            config: { prompt, enabled: true, keywords: "", sources: [] },
-            needsPersist: true,
-          };
-        }
-      }
-    }
-    const first = parsed[0];
-    const prompt =
-      first &&
-      typeof first === "object" &&
-      "prompt" in first &&
-      typeof first.prompt === "string"
-        ? first.prompt
-        : "";
-    return {
-      config: {
-        prompt,
-        enabled: prompt.trim().length > 0,
-        keywords: "",
-        sources: [],
-      },
-      needsPersist: true,
-    };
-  }
-
-  const record = asRecord(parsed);
-  if (!record) {
-    throw new Error("filter config must be an object or array");
-  }
-
-  const prompt = typeof record.prompt === "string" ? record.prompt : "";
-  const hasEnabled = "enabled" in record;
-  const enabled = hasEnabled ? Boolean(record.enabled) : prompt.trim().length > 0;
-  const keywords = typeof record.keywords === "string" ? record.keywords : "";
-  const sources = Array.isArray(record.sources)
-    ? [...new Set(record.sources.filter((source): source is string => typeof source === "string").map(normalizeFilterSource).filter(Boolean))]
-    : [];
-  const needsPersist =
-    !hasEnabled ||
-    !("keywords" in record) ||
-    !Array.isArray(record.sources) ||
-    "keywordEnabled" in record ||
-    "id" in record ||
-    "name" in record ||
-    "whitelist" in record ||
-    "blacklist" in record ||
-    "filters" in record;
-  return { config: { prompt, enabled, keywords, sources }, needsPersist };
+function normalizeFilterSources(sources: string[]): string[] {
+  return [...new Set(sources.map(normalizeFilterSource).filter(Boolean))];
 }
 
-export function parseTranslateConfig(parsed: unknown): TranslateConfig {
-  const record = asRecord(parsed);
-  if (!record) {
-    throw new Error("translate config must be an object");
-  }
-  return {
-    prompt: typeof record.prompt === "string" ? record.prompt : "",
-    enabled: Boolean(record.enabled),
-    targetLang:
-      parseTranslateTargetLang(record.targetLang) ?? DEFAULT_TRANSLATE_TARGET_LANG,
-  };
-}
-
-function clampNumber(
-  value: unknown,
-  limits: { min: number; max: number },
-  fallback: number,
-  integer = false,
-): number {
-  const num = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(num)) return fallback;
-  const bounded = Math.min(limits.max, Math.max(limits.min, num));
-  return integer ? Math.round(bounded) : bounded;
-}
-
-export function parseDedupConfig(parsed: unknown): DedupConfig {
-  const record = asRecord(parsed);
-  if (!record) throw new Error("dedup config must be an object");
-  return {
-    enabled:
-      typeof record.enabled === "boolean" ? record.enabled : DEFAULT_DEDUP.enabled,
-    windowDays: clampNumber(
-      record.windowDays,
-      DEDUP_LIMITS.windowDays,
-      DEFAULT_DEDUP.windowDays,
-      true,
-    ),
-    minSimilarity: clampNumber(
-      record.minSimilarity,
-      DEDUP_LIMITS.minSimilarity,
-      DEFAULT_DEDUP.minSimilarity,
-    ),
-    maxCandidates: clampNumber(
-      record.maxCandidates,
-      DEDUP_LIMITS.maxCandidates,
-      DEFAULT_DEDUP.maxCandidates,
-      true,
-    ),
-  };
-}
-
-export function parseFeverConfig(parsed: unknown): FeverConfig {
-  const record = asRecord(parsed);
-  if (!record) {
-    throw new Error("fever config must be an object");
-  }
-  return {
-    enabled: Boolean(record.enabled),
-    user: typeof record.user === "string" ? record.user : "",
-    password: typeof record.password === "string" ? record.password : "",
-  };
-}
-
-export function parseMcpConfig(parsed: unknown): McpConfig {
-  const record = asRecord(parsed);
-  if (!record) throw new Error("mcp config must be an object");
-  return {
-    remoteAccess: Boolean(record.remoteAccess),
-    authorization:
-      typeof record.authorization === "string" ? record.authorization : "",
-  };
-}
-
-function normalizeStopwords(values: unknown[]): string[] {
+function normalizeStopwords(values: string[]): string[] {
   return [
     ...new Set(
-      values
-        .filter((value): value is string => typeof value === "string")
-        .map((value) => value.trim().toLocaleLowerCase())
-        .filter(Boolean),
+      values.map((value) => value.trim().toLocaleLowerCase()).filter(Boolean),
     ),
   ];
 }
 
-export function parseTokenizerConfig(parsed: unknown): TokenizerConfig {
-  const record = asRecord(parsed);
-  if (!record) throw new Error("tokenizer config must be an object");
-  return {
-    stopwords: Array.isArray(record.stopwords)
-      ? normalizeStopwords(record.stopwords)
-      : [...DEFAULT_TOKENIZER.stopwords],
-  };
+/** A number clamped into `limits`; missing values take `fallback`. */
+function clampedNumber(
+  limits: { min: number; max: number },
+  fallback: number,
+  integer = false,
+) {
+  return z
+    .number()
+    .default(fallback)
+    .transform((value) => {
+      const bounded = Math.min(limits.max, Math.max(limits.min, value));
+      return integer ? Math.round(bounded) : bounded;
+    });
 }
 
+// Each section fills missing fields with defaults; a field of the wrong type
+// is an error, so a hand-edited mistake is reported instead of dropped.
+const FilterSchema = z.object({
+  prompt: z.string().default(""),
+  enabled: z.boolean().default(false),
+  keywords: z.string().default(""),
+  sources: z.array(z.string()).default(() => []).transform(normalizeFilterSources),
+});
+
+const TranslateSchema = z.object({
+  prompt: z.string().default(""),
+  enabled: z.boolean().default(false),
+  targetLang: z.enum(TRANSLATE_TARGET_LANGS).default(DEFAULT_TRANSLATE_TARGET_LANG),
+});
+
+const DedupSchema = z.object({
+  enabled: z.boolean().default(true),
+  windowDays: clampedNumber(DEDUP_LIMITS.windowDays, 3, true),
+  minSimilarity: clampedNumber(DEDUP_LIMITS.minSimilarity, 0.6),
+  maxCandidates: clampedNumber(DEDUP_LIMITS.maxCandidates, 5, true),
+});
+
+const FeverSchema = z.object({
+  enabled: z.boolean().default(false),
+  user: z.string().default(""),
+  password: z.string().default(""),
+});
+
+const McpSchema = z.object({
+  remoteAccess: z.boolean().default(false),
+  authorization: z.string().default(""),
+});
+
+const TokenizerSchema = z.object({
+  stopwords: z
+    .array(z.string())
+    .default(() => [...DEFAULT_STOPWORDS])
+    .transform(normalizeStopwords),
+});
+
+const AppConfigSchema = z.object({
+  filter: FilterSchema.prefault({}),
+  translate: TranslateSchema.prefault({}),
+  dedup: DedupSchema.prefault({}),
+  fever: FeverSchema.prefault({}),
+  mcp: McpSchema.prefault({}),
+  tokenizer: TokenizerSchema.prefault({}),
+});
+
+let loaded = false;
+let config: AppConfig = AppConfigSchema.parse({});
+let writeLock: Promise<void> = Promise.resolve();
+
 async function readJsonFile(path: string): Promise<unknown | null> {
+  let text: string;
   try {
-    return JSON.parse(await readFile(path, "utf-8"));
+    text = await readFile(path, "utf-8");
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") {
       return null;
     }
     throw error;
   }
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${path} is not valid JSON: ${message}`);
+  }
+}
+
+const RENAME_ATTEMPTS = 3;
+
+/**
+ * Write via a synced temp file and rename, so a crash leaves either the old
+ * or the new file, never a truncated one. Windows can briefly refuse the
+ * rename while another process (antivirus, indexer) has the target open.
+ */
+async function writeFileAtomic(path: string, data: string): Promise<void> {
+  const tmp = `${path}.${process.pid}.tmp`;
+  const handle = await open(tmp, "w", 0o600);
+  try {
+    await handle.writeFile(data, "utf-8");
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+
+  for (let attempt = 1; ; attempt++) {
+    try {
+      await rename(tmp, path);
+      return;
+    } catch (error) {
+      const code = error instanceof Error && "code" in error ? error.code : null;
+      const retryable = code === "EPERM" || code === "EACCES" || code === "EBUSY";
+      if (!retryable || attempt >= RENAME_ATTEMPTS) {
+        await rm(tmp, { force: true }).catch(() => {});
+        throw error;
+      }
+      await Bun.sleep(50 * attempt);
+    }
+  }
 }
 
 async function persistUnlocked(): Promise<void> {
-  const data = JSON.stringify(config, null, 2);
-  await writeFile(CONFIG_PATH, data, "utf-8");
+  await writeFileAtomic(CONFIG_PATH, JSON.stringify(config, null, 2));
 }
 
 async function persist(): Promise<void> {
@@ -333,105 +238,33 @@ async function persist(): Promise<void> {
   await pending;
 }
 
-async function loadLegacySections(): Promise<{
-  config: AppConfig;
-  needsPersist: boolean;
-}> {
-  let needsPersist = false;
-  const next = cloneConfig({
-    filter: { ...DEFAULT_FILTER },
-    translate: { ...DEFAULT_TRANSLATE },
-    dedup: { ...DEFAULT_DEDUP },
-    fever: { ...DEFAULT_FEVER },
-    mcp: { ...DEFAULT_MCP },
-    tokenizer: { ...DEFAULT_TOKENIZER },
-  });
-
-  const filterRaw =
-    (await readJsonFile(LEGACY_FILTER_PATH)) ??
-    (await readJsonFile(LEGACY_FILTERS_PATH));
-  if (filterRaw !== null) {
-    const parsed = parseFilterConfig(filterRaw);
-    next.filter = parsed.config;
-    needsPersist = true;
-  }
-
-  const translateRaw = await readJsonFile(LEGACY_TRANSLATE_PATH);
-  if (translateRaw !== null) {
-    next.translate = parseTranslateConfig(translateRaw);
-    needsPersist = true;
-  }
-
-  const feverRaw = await readJsonFile(LEGACY_FEVER_PATH);
-  if (feverRaw !== null) {
-    next.fever = parseFeverConfig(feverRaw);
-    needsPersist = true;
-  }
-
-  return { config: next, needsPersist };
-}
-
+/**
+ * Load `config.json`, filling missing sections and fields with defaults.
+ * An unreadable or invalid file throws rather than falling back to defaults,
+ * since the next save would then overwrite the user's settings.
+ */
 export async function loadAppConfig(): Promise<void> {
   if (loaded) return;
 
-  try {
-    const raw = await readJsonFile(CONFIG_PATH);
-    if (raw !== null) {
-      const record = asRecord(raw);
-      if (!record) {
-        throw new Error("config.json must be an object");
-      }
-      let needsPersist = false;
-      if (record.filter !== undefined) {
-        const parsed = parseFilterConfig(record.filter);
-        config.filter = parsed.config;
-        needsPersist = needsPersist || parsed.needsPersist;
-      }
-      if (record.translate !== undefined) {
-        config.translate = parseTranslateConfig(record.translate);
-      }
-      if (record.dedup !== undefined) {
-        config.dedup = parseDedupConfig(record.dedup);
-      } else {
-        needsPersist = true;
-      }
-      if (record.fever !== undefined) {
-        config.fever = parseFeverConfig(record.fever);
-      }
-      if (record.mcp !== undefined) {
-        config.mcp = parseMcpConfig(record.mcp);
-      }
-      if (record.tokenizer !== undefined) {
-        config.tokenizer = parseTokenizerConfig(record.tokenizer);
-      } else {
-        needsPersist = true;
-      }
-      loaded = true;
-      if (needsPersist) {
-        await persist();
-      }
-      return;
-    }
+  const raw = await readJsonFile(CONFIG_PATH);
+  if (raw === null) {
+    loaded = true;
+    return;
+  }
 
-    const migrated = await loadLegacySections();
-    config = migrated.config;
-    loaded = true;
-    if (migrated.needsPersist) {
-      await persist();
-    }
-  } catch (error) {
-    console.error("Error loading config.json:", error);
-    config = {
-      filter: { ...DEFAULT_FILTER },
-      translate: { ...DEFAULT_TRANSLATE },
-      dedup: { ...DEFAULT_DEDUP },
-      fever: { ...DEFAULT_FEVER },
-      mcp: { ...DEFAULT_MCP },
-      tokenizer: { ...DEFAULT_TOKENIZER },
-    };
-    loaded = true;
+  const result = AppConfigSchema.safeParse(raw);
+  if (!result.success) {
+    throw new Error(`Invalid ${CONFIG_PATH}:\n${z.prettifyError(result.error)}`);
+  }
+  config = result.data;
+  loaded = true;
+
+  // Write back filled-in defaults and normalized values.
+  if (JSON.stringify(config) !== JSON.stringify(raw)) {
+    await persist();
   }
 }
+
 
 export function getFilterState(): FilterConfig {
   return { ...config.filter };
@@ -478,14 +311,9 @@ export async function updateFilterState(partial: {
     config.filter.keywords = partial.keywords;
   }
   if (Array.isArray(partial.sources)) {
-    config.filter.sources = [
-      ...new Set(
-        partial.sources
-          .filter((source): source is string => typeof source === "string")
-          .map(normalizeFilterSource)
-          .filter(Boolean),
-      ),
-    ];
+    config.filter.sources = normalizeFilterSources(
+      partial.sources.filter((source): source is string => typeof source === "string"),
+    );
   }
   await persist();
   return getFilterState();
@@ -516,7 +344,7 @@ export async function updateTranslateState(partial: {
 export async function updateDedupState(
   partial: Partial<DedupConfig>,
 ): Promise<DedupConfig> {
-  config.dedup = parseDedupConfig({ ...config.dedup, ...partial });
+  config.dedup = DedupSchema.parse({ ...config.dedup, ...partial });
   await persist();
   return getDedupState();
 }

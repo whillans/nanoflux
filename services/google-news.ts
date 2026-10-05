@@ -12,7 +12,7 @@ const BROWSER_USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 const RESOLVE_TIMEOUT_MS = 15_000;
 
-function isGoogleNewsArticleUrl(url: string): boolean {
+export function isGoogleNewsArticleUrl(url: string): boolean {
   try {
     const parsed = new URL(url);
     if (!GOOGLE_NEWS_HOST.test(parsed.hostname)) return false;

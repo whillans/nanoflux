@@ -5,6 +5,14 @@ const MAX_INTERVAL_MIN = 30;
 
 export const DEFAULT_FETCH_INTERVAL_MIN = 15;
 
+const FAILURE_BACKOFF_MAX_MIN = 6 * 60;
+
+/** Retry delay after `failures` consecutive failed fetches: 5, 10, 20, … capped at 6h. */
+export function failureBackoffMin(failures: number): number {
+  const exponent = Math.min(Math.max(failures, 1) - 1, 16);
+  return Math.min(FAILURE_BACKOFF_MAX_MIN, MIN_INTERVAL_MIN * 2 ** exponent);
+}
+
 function medianPublishGapSec(feedItems: Parser.Item[]): number | null {
   const now = Date.now();
   const maxAgeMs = 7 * 24 * 60 * 60 * 1000;

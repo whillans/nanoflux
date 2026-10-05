@@ -1,19 +1,25 @@
 import Parser from "rss-parser";
 import { getExistingGuids, sourceFromLink } from "../../db/items";
-import { getDueFeeds, updateFeedFetchState } from "../../db/feeds";
+import {
+  getDueFeeds,
+  recordFeedFetchFailure,
+  updateFeedFetchState,
+} from "../../db/feeds";
 import type { Feed } from "../../db/schema";
 import { parseFeedGuids, serializeFeedGuids } from "../../db/utils";
 import { maxPublishedAt, parsePublishedAt } from "../../utils/date";
 import { isMd5Format, md5Hex } from "../../utils/hash";
 import { stripHtml } from "../../utils/html";
-import { enrichItemsContent } from "../content/extractor";
+import { enrichItemsContent, resolveItemLinks } from "../content/extractor";
 import { addItemsWithDedup } from "../dedup";
-import { filterItems } from "../filters";
+import { filterItems, partitionByRules } from "../filters";
+import { isGoogleNewsArticleUrl } from "../google-news";
 import { translateItemTitles } from "../translate";
-import { fetchRssFeed } from "../rss";
+import { fetchRssFeed, fetchRssFeedConditional } from "../rss";
 import { pickCoverFromRss } from "./cover";
 import {
   DEFAULT_FETCH_INTERVAL_MIN,
+  failureBackoffMin,
   nextFetchedAtIso,
   nextFetchIntervalMin,
 } from "./interval";
@@ -22,6 +28,8 @@ type RssItemFields = {
   mediaContent?: unknown;
   mediaThumbnail?: unknown;
   image?: unknown;
+  /** Raw `<source url="…">` elements; rss-parser flattens `source` to its text. */
+  sourceElement?: unknown;
 };
 
 const rssParser = new Parser<Record<string, unknown>, RssItemFields>({
@@ -30,9 +38,28 @@ const rssParser = new Parser<Record<string, unknown>, RssItemFields>({
       ["media:content", "mediaContent", { keepArray: true }],
       ["media:thumbnail", "mediaThumbnail", { keepArray: true }],
       "image",
+      ["source", "sourceElement", { keepArray: true }],
     ],
   },
 });
+
+function sourceElementUrl(value: unknown): string | null {
+  if (!Array.isArray(value)) return null;
+  const url = value[0]?.$?.url;
+  return typeof url === "string" && url.trim() ? url.trim() : null;
+}
+
+/**
+ * Publisher domain of an entry. A Google News link only points at Google, but
+ * its `<source url>` names the publisher, so rules can run before resolution.
+ */
+function entrySource(entry: RssItemFields, link: string): string {
+  if (isGoogleNewsArticleUrl(link)) {
+    const url = sourceElementUrl(entry.sourceElement);
+    if (url) return sourceFromLink(url);
+  }
+  return sourceFromLink(link);
+}
 
 /** Keep each tick finite when many feeds are overdue or a feed has a large backlog. */
 const MAX_FEEDS_PER_TICK = 3;
@@ -68,6 +95,7 @@ function toStoredItem(entry: Parser.Item & RssItemFields) {
     content: description && description != title ? description : null,
     cover: pickCoverFromRss(entry, link),
     published_at,
+    source: entrySource(entry, link),
   };
 }
 
@@ -118,7 +146,22 @@ export async function fetchFeed(feed: Feed): Promise<{
     feed.fetch_interval_min || DEFAULT_FETCH_INTERVAL_MIN;
 
   try {
-    const parsed = await fetchRssFeed(feed.url, rssParser);
+    const result = await fetchRssFeedConditional(feed.url, rssParser, {
+      etag: feed.http_etag,
+      lastModified: feed.http_last_modified,
+    });
+    if (result.notModified) {
+      const nextInterval = nextFetchIntervalMin(currentInterval, 0, []);
+      updateFeedFetchState(feed.id, {
+        next_fetched_at: nextFetchedAtIso(nextInterval),
+        fetch_interval_min: nextInterval,
+        http_etag: result.validators.etag,
+        http_last_modified: result.validators.lastModified,
+      });
+      return { newItems: [] };
+    }
+
+    const parsed = result.feed;
     const rawItems = parsed.items ?? [];
     const entries = rawItems
       .map(toStoredItem)
@@ -132,11 +175,27 @@ export async function fetchFeed(feed: Feed): Promise<{
     const batch = candidates.slice(0, MAX_NEW_ITEMS_PER_FEED);
     const remaining = candidates.length - batch.length;
     const unprocessed = new Set(candidates.slice(MAX_NEW_ITEMS_PER_FEED).map((entry) => entry.guid));
-    const enriched = (await enrichItemsContent(batch)).map((item) => ({
+    // Source and keyword rules run before any network work, so rejected items
+    // are never resolved or scraped. A resolved link can show a different
+    // domain than the `<source>` hint, so resolved items are screened again.
+    const [earlyRejected, screened] = partitionByRules(batch);
+    const resolved = (await resolveItemLinks(screened)).map((item) => ({
       ...item,
       source: sourceFromLink(item.link),
     }));
-    const filtered = await filterItems(enriched);
+    const [lateRejected, kept] = partitionByRules(resolved);
+    const ruleRejected = earlyRejected.length + lateRejected.length;
+    if (ruleRejected > 0) {
+      console.log(
+        `[filter] ${feed.title}: rules rejected ${ruleRejected}/${batch.length} before scraping`,
+      );
+    }
+    const enriched = await enrichItemsContent(kept);
+    const filtered = [
+      ...earlyRejected,
+      ...lateRejected,
+      ...(await filterItems(enriched)),
+    ];
     const translated = await translateItemTitles(filtered);
     const inserted = await addItemsWithDedup(feed.id, translated);
 
@@ -163,6 +222,11 @@ export async function fetchFeed(feed: Feed): Promise<{
           .filter((entry) => !unprocessed.has(entry.guid))
           .map((entry) => entry.guid),
       ),
+      // A backlog must be re-read in full next time, so skip validators until
+      // it is drained; otherwise the server answers 304 and drops the rest.
+      http_etag: remaining > 0 ? null : result.validators.etag,
+      http_last_modified:
+        remaining > 0 ? null : result.validators.lastModified,
     });
 
     if (remaining > 0) {
@@ -174,7 +238,21 @@ export async function fetchFeed(feed: Feed): Promise<{
     return { newItems: inserted };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";
-    return { newItems: [], error: `${feed.title}: ${message}` };
+    const failures = (feed.fetch_failures ?? 0) + 1;
+    const backoffMin = failureBackoffMin(failures);
+    try {
+      recordFeedFetchFailure(feed.id, {
+        next_fetched_at: nextFetchedAtIso(backoffMin),
+        fetch_failures: failures,
+        last_error: message.slice(0, 500),
+      });
+    } catch (recordError) {
+      console.error("[fetch]", recordError);
+    }
+    return {
+      newItems: [],
+      error: `${feed.title}: ${message} (failures=${failures}, retry in ${backoffMin}m)`,
+    };
   } finally {
     inFlightFeedIds.delete(feed.id);
   }

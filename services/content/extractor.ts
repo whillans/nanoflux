@@ -4,7 +4,7 @@ import { decodeHtmlBytes } from "../../utils/encoding";
 import { countContentTokens } from "../../utils/text";
 import { htmlToPlainText, stripSrcsetAttributes } from "../../utils/html";
 import { resolveArticleUrl } from "../google-news";
-import { httpGet } from "../http-fetcher";
+import { publicHttpGet, readBodyLimited } from "../http-fetcher";
 import { pickCoverFromHtml, pickCoverFromMeta } from "../feeds/cover";
 
 /** Unified token threshold; roughly ~200 Chinese chars / 80 English words. */
@@ -16,6 +16,7 @@ const BROWSER_USER_AGENT =
 
 const ARTICLE_TIMEOUT_MS = 15_000;
 const SCRAPE_CONCURRENCY = 3;
+const MAX_ARTICLE_BYTES = 5 * 1024 * 1024;
 
 /**
  * Readability's default 500-char floor is tuned for English. Chinese news
@@ -107,7 +108,7 @@ function extractArticleHtml(html: string, url: string): string | null {
 
 async function fetchArticleHtml(url: string): Promise<string | null> {
   try {
-    const response = await httpGet(url, {
+    const response = await publicHttpGet(url, {
       headers: {
         "User-Agent": BROWSER_USER_AGENT,
         Accept:
@@ -118,7 +119,7 @@ async function fetchArticleHtml(url: string): Promise<string | null> {
     });
     if (!response.ok) return null;
 
-    const bytes = Buffer.from(await response.arrayBuffer());
+    const bytes = await readBodyLimited(response, MAX_ARTICLE_BYTES);
     return stripSrcsetAttributes(
       decodeHtmlBytes(bytes, response.headers.get("content-type")),
     );
@@ -130,8 +131,7 @@ async function fetchArticleHtml(url: string): Promise<string | null> {
 async function enrichItemContent<
   T extends { link: string; content: string | null; cover: string | null },
 >(item: T): Promise<T> {
-  const resolvedLink = await resolveArticleUrl(item.link);
-  let next = resolvedLink !== item.link ? { ...item, link: resolvedLink } : item;
+  let next = item;
 
   const needCover = !next.cover;
   const needContent = needsFullContentScrape(next.content);
@@ -169,15 +169,31 @@ async function enrichItemContent<
   return next;
 }
 
+async function mapInBatches<T, R>(
+  items: T[],
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = [];
+  for (let i = 0; i < items.length; i += SCRAPE_CONCURRENCY) {
+    const batch = items.slice(i, i + SCRAPE_CONCURRENCY);
+    results.push(...(await Promise.all(batch.map(fn))));
+  }
+  return results;
+}
+
+/** Replace Google News redirect links with the publisher's article URL. */
+export async function resolveItemLinks<T extends { link: string }>(
+  items: T[],
+): Promise<T[]> {
+  return mapInBatches(items, async (item) => {
+    const link = await resolveArticleUrl(item.link);
+    return link !== item.link ? { ...item, link } : item;
+  });
+}
+
+/** Scrape full text and cover for items with a resolved article link. */
 export async function enrichItemsContent<
   T extends { link: string; content: string | null; cover: string | null },
 >(items: T[]): Promise<T[]> {
-  const enriched: T[] = [];
-
-  for (let i = 0; i < items.length; i += SCRAPE_CONCURRENCY) {
-    const batch = items.slice(i, i + SCRAPE_CONCURRENCY);
-    enriched.push(...(await Promise.all(batch.map(enrichItemContent))));
-  }
-
-  return enriched;
+  return mapInBatches(items, enrichItemContent);
 }

@@ -1,7 +1,7 @@
 import { Elysia, type AnyElysia } from "elysia";
 import { getMcpState } from "../config";
 import { passwordsEqual, readBearer } from "./admin-auth";
-import { isLocalhostAddress } from "./localhost-only";
+import { isLocalRequest } from "./localhost-only";
 
 /**
  * MCP is local-only by default. Remote access can be enabled at runtime, and
@@ -13,7 +13,7 @@ export function withMcpAccess(routes: AnyElysia) {
       const config = getMcpState();
       const address = server?.requestIP(request)?.address;
       if (!config.remoteAccess) {
-        if (isLocalhostAddress(address)) return;
+        if (isLocalRequest(request, address)) return;
         set.status = 403;
         return { error: "Forbidden" };
       }

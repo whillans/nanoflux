@@ -12,13 +12,49 @@ import { DEFAULT_LOCALE, parseLocale } from "../shared/locale";
 import { buildItemsExport, type ExportLocale } from "../services/export/items-export";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../db/schema";
 import { encodeCursor, parseItemId, parseTimeUnit } from "../db/utils";
-import { httpGet } from "../services/http-fetcher";
+import { publicHttpGet } from "../services/http-fetcher";
 
 const COVER_FETCH_TIMEOUT_MS = 15_000;
 const MAX_COVER_BYTES = 10 * 1024 * 1024;
+/** The list only shows a two-line content summary, so don't ship the full text. */
+const LIST_CONTENT_CHARS = 300;
+
+/**
+ * Raster formats only. SVG (and anything else a browser can run script in)
+ * is refused, since this endpoint serves third-party bytes from our origin.
+ */
+const COVER_CONTENT_TYPES = new Set([
+  "image/avif",
+  "image/webp",
+  "image/apng",
+  "image/png",
+  "image/jpeg",
+  "image/jpg",
+  "image/pjpeg",
+  "image/gif",
+  "image/bmp",
+  "image/x-icon",
+  "image/vnd.microsoft.icon",
+]);
+
+/**
+ * Opening a cover URL directly must never run as a same-origin document:
+ * block every fetch and give it an opaque origin even if the type check misses.
+ */
+const COVER_SECURITY_HEADERS = {
+  "Content-Security-Policy": "default-src 'none'; sandbox",
+  "X-Content-Type-Options": "nosniff",
+};
 
 function coverError(status: number, message: string): Response {
-  return new Response(message, { status, headers: { "Cache-Control": "no-store" } });
+  return new Response(message, {
+    status,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-store",
+      ...COVER_SECURITY_HEADERS,
+    },
+  });
 }
 
 async function coverHandler({ params }: { params: { id: string } }): Promise<Response> {
@@ -39,22 +75,21 @@ async function coverHandler({ params }: { params: { id: string } }): Promise<Res
   }
 
   try {
-    // The URL is read only from our item store rather than a request parameter,
-    // so this endpoint cannot be used as an arbitrary network proxy. Following
-    // redirects is necessary for image CDNs that serve a canonical image URL.
-    const response = await httpGet(url.href, {
-      redirect: "follow",
+    // The URL comes from feed content, so it is untrusted: publicHttpGet
+    // follows redirects (image CDNs need them) but checks every hop's address.
+    const response = await publicHttpGet(url.href, {
       signal: AbortSignal.timeout(COVER_FETCH_TIMEOUT_MS),
       headers: {
-        Accept: "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+        Accept: "image/avif,image/webp,image/apng,image/*;q=0.8",
         "User-Agent": "NanoFlux cover proxy",
       },
     });
     if (!response.ok) return coverError(502, "Unable to fetch cover");
 
     const contentType = response.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
-    if (!contentType?.startsWith("image/")) {
-      return coverError(415, "Cover response is not an image");
+    if (!contentType || !COVER_CONTENT_TYPES.has(contentType)) {
+      await response.body?.cancel().catch(() => {});
+      return coverError(415, "Cover response is not a supported raster image");
     }
     const contentLength = Number(response.headers.get("content-length"));
     if (Number.isFinite(contentLength) && contentLength > MAX_COVER_BYTES) {
@@ -78,7 +113,7 @@ async function coverHandler({ params }: { params: { id: string } }): Promise<Res
       headers: {
         "Content-Type": contentType,
         "Cache-Control": "private, max-age=86400",
-        "X-Content-Type-Options": "nosniff",
+        ...COVER_SECURITY_HEADERS,
       },
     });
   } catch {
@@ -126,6 +161,7 @@ function getItemsHandler({ query }: {
       unit: unit ? unit.toString() : undefined,
       count: query?.count,
       isRead,
+      contentChars: LIST_CONTENT_CHARS,
     });
 
     const hasMore = selected.length > adjustedLimit;

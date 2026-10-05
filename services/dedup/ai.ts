@@ -1,6 +1,7 @@
-import { chatCompletion, getAiConfig } from "../ai/client";
+import { z } from "zod";
+import { chatCompletionJson, getAiConfig } from "../ai/client";
 
-const MAX_CONTENT_CHARS = 300;
+export const MAX_CONTENT_CHARS = 300;
 
 export type DedupNews = {
   title: string;
@@ -17,22 +18,17 @@ function describe(news: DedupNews): string {
   ].join("\n");
 }
 
-function parseDuplicates(text: string, count: number): number[] | null {
-  const jsonMatch = text.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) return null;
-  try {
-    const parsed = JSON.parse(jsonMatch[0]) as { duplicates?: unknown };
-    if (!Array.isArray(parsed.duplicates)) return null;
-    return [
-      ...new Set(
-        parsed.duplicates
-          .map((value) => Number(value))
-          .filter((value) => Number.isInteger(value) && value >= 1 && value <= count),
-      ),
-    ];
-  } catch {
-    return null;
-  }
+const DuplicatesSchema = z.object({
+  duplicates: z.array(z.number()),
+});
+
+/** Keep 1-based candidate numbers that are integers within range, deduplicated. */
+function normalizeDuplicates(values: number[], count: number): number[] {
+  return [
+    ...new Set(
+      values.filter((value) => Number.isInteger(value) && value >= 1 && value <= count),
+    ),
+  ];
 }
 
 /**
@@ -54,17 +50,15 @@ export async function applyAiDedup(
   ].join("\n");
 
   try {
-    const text = await chatCompletion(
+    const { duplicates } = await chatCompletionJson(
       "You are a news deduplicator. A candidate is a duplicate when it reports the same event or story as the new news, " +
         "even if worded differently, translated, or from another outlet. Related but different events are not duplicates. " +
         'Reply with JSON only: {"duplicates": number[]} listing the candidate numbers that are duplicates (empty when none).',
       userMessage,
+      DuplicatesSchema,
+      "news_dedup_verdict",
     );
-    const duplicates = parseDuplicates(text, candidates.length);
-    if (!duplicates) {
-      throw new Error(`Unparseable AI response: ${text.slice(0, 100)}`);
-    }
-    return duplicates.map((value) => value - 1);
+    return normalizeDuplicates(duplicates, candidates.length).map((value) => value - 1);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[ai-dedup] ${message}`);
