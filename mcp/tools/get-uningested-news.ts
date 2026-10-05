@@ -6,7 +6,7 @@ export function registerGetUningestedNews(server: McpServer): void {
     "get_uningested_news",
     {
       description:
-        "Fetch the next batch of passed first-report news (not a duplicate of an earlier item) from the last 3 days that has not been returned before, in ascending item_id order. Takes no parameters: the server remembers the last item returned. When hasMore is true, call again to fetch the next batch until hasMore is false.",
+        "Fetch the next batch of passed first-report news (not a duplicate of an earlier item) from the last 3 days that has not been returned before, oldest ingested first. Each news story is returned once, even when an earlier report of it arrives later. Takes no parameters: the server remembers the last item returned. When hasMore is true, call again to fetch the next batch until hasMore is false.",
       inputSchema: {},
     },
 

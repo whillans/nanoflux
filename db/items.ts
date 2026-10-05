@@ -609,9 +609,12 @@ const MCP_NEWS_WINDOW_MS = 3 * TimeUnit.DAY;
 
 /**
  * Hands out the next batch of recent visible first reports (items that do not
- * duplicate an earlier one) to MCP in ascending item ID order. The largest ID
- * handed out is stored, so each call resumes after the previous one and no
- * item is returned twice.
+ * duplicate an earlier one) to MCP, one per news cluster.
+ *
+ * A cluster is ordered by its earliest-ingested member, and the stored cursor
+ * is that ID for the last cluster handed out. A first report that arrives
+ * after one of its duplicates takes over as the cluster root with a newer ID;
+ * keying on the earliest member keeps that cluster from being returned again.
  */
 export function takeUningestedItems(): {
   items: {
@@ -634,6 +637,9 @@ export function takeUningestedItems(): {
       const cursor = Number(stored?.value);
       const since = new Date(Date.now() - MCP_NEWS_WINDOW_MS).toISOString();
 
+      // Earliest-ingested member of the cluster rooted at this item.
+      const firstId = sql<number>`min(${items.id}, coalesce((select min(m.id) from ${items} m where m.sim_id = ${items.id}), ${items.id}))`;
+
       const selected = tx
         .select({
           id: items.id,
@@ -642,18 +648,19 @@ export function takeUningestedItems(): {
           content: items.content,
           published_at: items.published_at,
           feed_title: feeds.title,
+          first_id: firstId,
         })
         .from(items)
         .innerJoin(feeds, eq(items.feed_id, feeds.id))
         .where(
           and(
-            Number.isSafeInteger(cursor) ? gt(items.id, cursor) : undefined,
+            Number.isSafeInteger(cursor) ? gt(firstId, cursor) : undefined,
             gte(items.published_at, since),
             eq(items.status, "passed"),
             isNull(items.sim_id),
           ),
         )
-        .orderBy(asc(items.id))
+        .orderBy(asc(firstId))
         .limit(MAX_LIMIT + 1)
         .all();
 
@@ -661,14 +668,17 @@ export function takeUningestedItems(): {
       const taken = selected.slice(0, MAX_LIMIT);
       const last = taken.at(-1);
       if (last) {
-        const value = String(last.id);
+        const value = String(last.first_id);
         tx.insert(meta)
           .values({ key: MCP_NEWS_CURSOR_KEY, value })
           .onConflictDoUpdate({ target: meta.key, set: { value } })
           .run();
       }
 
-      return { items: taken, hasMore };
+      return {
+        items: taken.map(({ first_id, ...item }) => item),
+        hasMore,
+      };
     });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
