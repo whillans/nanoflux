@@ -18,7 +18,7 @@ export async function translateItemTitles<
     return items;
   }
 
-  const { prompt, targetLang } = getTranslateConfig();
+  const { targetLang } = getTranslateConfig();
   const active = items.filter((item) => item.status === undefined || item.status === "passed");
   const toTranslate = active.filter(
     (item) => !isTitleInTargetLang(item.title, targetLang),
@@ -38,7 +38,7 @@ export async function translateItemTitles<
       translated.push(item);
       continue;
     }
-    const title = await applyAiTitleTranslate(item.title, targetLang, prompt);
+    const title = await applyAiTitleTranslate(item.title, targetLang);
     translated.push({ ...item, title });
   }
   console.log(`[translate] done`);

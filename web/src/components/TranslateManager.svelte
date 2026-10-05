@@ -7,16 +7,9 @@
     type TranslateTargetLang,
   } from "../lib/api";
   import { t } from "../lib/locale.svelte";
-  import { DEFAULT_TRANSLATE_PROMPT } from "../../../shared/translate";
 
-  const inputClass =
-    "w-full border-0 border-b border-neutral-200 bg-transparent py-2 text-sm outline-none placeholder:text-neutral-300 focus:border-neutral-900 dark:border-neutral-700 dark:placeholder:text-neutral-600 dark:focus:border-neutral-100";
-  const textareaClass = "min-h-48 resize-y " + inputClass;
-
-  let prompt = $state("");
   let enabled = $state(false);
   let targetLang = $state<TranslateTargetLang>("zh-Hans");
-  let savedPrompt = $state("");
   let savedEnabled = $state(false);
   let savedTargetLang = $state<TranslateTargetLang>("zh-Hans");
   let formError = $state("");
@@ -24,9 +17,7 @@
   let saving = $state(false);
 
   const isDirty = $derived(
-    prompt.trim() !== savedPrompt ||
-      enabled !== savedEnabled ||
-      targetLang !== savedTargetLang,
+    enabled !== savedEnabled || targetLang !== savedTargetLang,
   );
   const saveDisabled = $derived(saving || loading || !isDirty);
 
@@ -36,20 +27,13 @@
       : "text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300";
   }
 
-  function enable() {
-    enabled = true;
-    if (!prompt.trim()) prompt = DEFAULT_TRANSLATE_PROMPT;
-  }
-
   async function loadTranslate() {
     formError = "";
     loading = true;
     try {
       const config = await fetchTranslate();
-      prompt = config.prompt;
       enabled = config.enabled;
       targetLang = config.targetLang;
-      savedPrompt = config.prompt;
       savedEnabled = config.enabled;
       savedTargetLang = config.targetLang;
     } catch (e) {
@@ -65,15 +49,9 @@
     saving = true;
 
     try {
-      const updated = await updateTranslate({
-        prompt: prompt.trim(),
-        enabled,
-        targetLang,
-      });
-      prompt = updated.prompt;
+      const updated = await updateTranslate({ enabled, targetLang });
       enabled = updated.enabled;
       targetLang = updated.targetLang;
-      savedPrompt = updated.prompt;
       savedEnabled = updated.enabled;
       savedTargetLang = updated.targetLang;
     } catch (err) {
@@ -110,7 +88,7 @@
             class="transition-colors {toggleClass(enabled)}"
             aria-pressed={enabled}
             disabled={saving}
-            onclick={enable}
+            onclick={() => (enabled = true)}
           >
             {t("translate.on")}
           </button>
@@ -154,13 +132,6 @@
           {/each}
         </div>
       </div>
-
-      <label class="block space-y-3">
-        <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-          {t("translate.prompt")}
-        </span>
-        <textarea bind:value={prompt} class={textareaClass} disabled={saving}></textarea>
-      </label>
 
       <button
         type="button"

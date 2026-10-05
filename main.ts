@@ -88,9 +88,9 @@ try {
   );
 }
 {
-  const { prompt, enabled, targetLang } = getTranslateConfig();
+  const { enabled, targetLang } = getTranslateConfig();
   console.log(
-    `[translate] config loaded enabled=${enabled} targetLang=${targetLang} promptChars=${prompt.trim().length}`,
+    `[translate] config loaded enabled=${enabled} targetLang=${targetLang}`,
   );
 }
 {

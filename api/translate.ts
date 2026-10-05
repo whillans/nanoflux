@@ -24,20 +24,15 @@ async function updateTranslateHandler({
   body,
 }: {
   body: {
-    prompt?: string;
     enabled?: boolean;
     targetLang?: TranslateTargetLang;
   };
 }) {
   try {
     const payload: {
-      prompt?: string;
       enabled?: boolean;
       targetLang?: TranslateTargetLang;
     } = {};
-    if (typeof body?.prompt === "string") {
-      payload.prompt = body.prompt;
-    }
     if (typeof body?.enabled === "boolean") {
       payload.enabled = body.enabled;
     }
@@ -60,7 +55,6 @@ export const routes = new Elysia({ prefix: "/api/translate" })
   .get("/", getTranslateHandler)
   .post("/", updateTranslateHandler, {
     body: t.Object({
-      prompt: t.Optional(t.String()),
       enabled: t.Optional(t.Boolean()),
       targetLang: t.Optional(
         t.Union([

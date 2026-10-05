@@ -1,4 +1,5 @@
-import { chatCompletion, getAiConfig } from "../ai/client";
+import { getAiConfig } from "../ai/client";
+import { translate } from "../ai/translate";
 import type { TranslateTargetLang } from "../../translate";
 import { isTitleInTargetLang } from "./detect";
 
@@ -33,7 +34,6 @@ function unwrapTitle(text: string): string {
 export async function applyAiTitleTranslate(
   title: string,
   targetLang: TranslateTargetLang,
-  prompt: string,
 ): Promise<string> {
   const original = title.trim();
   if (!original) return title;
@@ -49,19 +49,8 @@ export async function applyAiTitleTranslate(
     return title;
   }
 
-  const target = TARGET_LANG_LABEL[targetLang];
-  const extra = prompt.trim();
-  const system =
-    "You are a news title translator. Translate the title into " +
-    `${target}. Reply with the translated title only — no quotes, labels, or explanation.` +
-    (extra ? " Follow the extra instructions when they do not conflict with this." : "");
-
-  const userMessage = extra
-    ? ["Instructions:", extra, "", "Title:", original].join("\n")
-    : original;
-
   try {
-    const text = await chatCompletion(system, userMessage);
+    const text = await translate(original, TARGET_LANG_LABEL[targetLang]);
     const translated = unwrapTitle(text);
     return translated || title;
   } catch (error) {
