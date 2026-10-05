@@ -19,6 +19,7 @@
   import { t } from "../lib/locale.svelte";
   import { formatTime } from "../lib/utils";
   import { buildKeywordGoogleNewsFeedUrl } from "../../../shared/google-news";
+  import { isHttpUrl, safeHref } from "../../../shared/url";
 
   const PAGE_SIZE = 20;
   const iconProps = { size: 16, strokeWidth: 1.5, "aria-hidden": true as const };
@@ -174,12 +175,7 @@
   }
 
   function isValidFeedUrl(value: string): boolean {
-    try {
-      const u = new URL(value.trim());
-      return u.protocol === "http:" || u.protocol === "https:";
-    } catch {
-      return false;
-    }
+    return isHttpUrl(value.trim());
   }
 
   function cancelPreview() {
@@ -735,7 +731,7 @@
               </time>
             </div>
             <a
-              href={feed.url}
+              href={safeHref(feed.url)}
               target="_blank"
               rel="noopener noreferrer"
               class="col-span-2 min-w-0 w-full truncate text-sm text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300"

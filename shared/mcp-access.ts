@@ -1,7 +1,7 @@
 import { Elysia, type AnyElysia } from "elysia";
 import { getMcpState } from "../config";
-import { passwordsEqual, readBearer } from "./admin-auth";
-import { isLocalRequest } from "./localhost-only";
+import { checkCredential, passwordsEqual, readBearer } from "./admin-auth";
+import { clientAddress, isLocalRequest } from "./localhost-only";
 
 /**
  * MCP is local-only by default. Remote access can be enabled at runtime, and
@@ -19,7 +19,18 @@ export function withMcpAccess(routes: AnyElysia) {
       }
 
       const token = readBearer(request.headers.get("authorization"));
-      if (token && passwordsEqual(token, config.authorization)) return;
+      if (token) {
+        const result = checkCredential(
+          "mcp",
+          clientAddress(request, address),
+          passwordsEqual(token, config.authorization),
+        );
+        if (result === "ok") return;
+        if (result === "blocked") {
+          set.status = 429;
+          return { error: "Too many failed attempts" };
+        }
+      }
       set.status = 401;
       set.headers["www-authenticate"] = "Bearer";
       return { error: "Unauthorized" };

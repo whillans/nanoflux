@@ -11,6 +11,8 @@ import {
   listFeverUnreadItemIds,
   markFeverReadState,
 } from "../db/fever";
+import { checkCredential } from "../shared/admin-auth";
+import { clientAddress } from "../shared/localhost-only";
 
 const API_VERSION = 3;
 
@@ -162,7 +164,8 @@ export async function handleFeverRequest(ctx: {
   request: Request;
   query: Record<string, unknown>;
   body?: unknown;
-  set: { headers: Record<string, unknown> };
+  set: { status?: number | string; headers: Record<string, unknown> };
+  server?: { requestIP(request: Request): { address: string } | null } | null;
 }): Promise<Record<string, unknown>> {
   ctx.set.headers["content-type"] = "application/json; charset=utf-8";
 
@@ -174,10 +177,18 @@ export async function handleFeverRequest(ctx: {
 
   const expected = getFeverApiKey();
   const provided = (params.api_key ?? "").trim().toLowerCase();
-  const authorized =
-    expected !== null && provided.length > 0 && safeEqual(provided, expected);
+  // Nothing to guess at without a key in the request or one configured.
+  if (expected === null || provided.length === 0) {
+    return { api_version: API_VERSION, auth: 0 };
+  }
 
-  if (!authorized) {
+  const client = clientAddress(
+    ctx.request,
+    ctx.server?.requestIP(ctx.request)?.address,
+  );
+  const result = checkCredential("fever", client, safeEqual(provided, expected));
+  if (result !== "ok") {
+    if (result === "blocked") ctx.set.status = 429;
     return { api_version: API_VERSION, auth: 0 };
   }
 

@@ -8,6 +8,7 @@ import {
 import type { Feed } from "../../db/schema";
 import { parseFeedGuids, serializeFeedGuids } from "../../db/utils";
 import { maxPublishedAt, parsePublishedAt } from "../../utils/date";
+import { isHttpUrl } from "../../shared/url";
 import { isMd5Format, md5Hex } from "../../utils/hash";
 import { stripHtml } from "../../utils/html";
 import { enrichItemsContent, resolveItemLinks } from "../content/extractor";
@@ -71,7 +72,8 @@ let dueFetchRunning = false;
 
 function toStoredItem(entry: Parser.Item & RssItemFields) {
   const link = entry.link?.trim();
-  if (!link) return null;
+  // The link is rendered as an `href`, so `javascript:` and the like are dropped.
+  if (!link || !isHttpUrl(link)) return null;
 
   const rawGuid = entry.guid?.trim() || link;
   const guid = isMd5Format(rawGuid) ? rawGuid : md5Hex(link);

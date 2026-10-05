@@ -12,6 +12,7 @@
     type Item,
   } from "../lib/api";
   import { formatTime } from "../lib/utils";
+  import { safeHref } from "../../../shared/url";
   import ItemFilterToggle from "./buttons/ItemFilterToggle.svelte";
   import MarkAllReadButton from "./buttons/MarkAllReadButton.svelte";
 
@@ -131,17 +132,15 @@
     hiddenCovers = new Set([...hiddenCovers, item.id]);
   }
 
-  /** Retry through the same-origin proxy only when a direct image request fails. */
-  function handleCoverError(event: Event, item: Item): void {
-    const image = event.currentTarget;
-    if (!(image instanceof HTMLImageElement)) return;
+  /**
+   * Covers always load through the same-origin proxy: a direct request would
+   * hand the feed's image host the reader's IP and the time they opened the list.
+   */
+  function coverSrc(item: Item): string {
+    return `/api/items/${item.id}/cover`;
+  }
 
-    if (image.dataset.proxyFallback !== "true") {
-      image.dataset.proxyFallback = "true";
-      image.src = `/api/items/${item.id}/cover`;
-      return;
-    }
-
+  function handleCoverError(item: Item): void {
     hiddenCovers = new Set([...hiddenCovers, item.id]);
   }
 
@@ -266,7 +265,7 @@
               <span>{item.feed_title}</span>
             </div>
             <a
-              href={item.link}
+              href={safeHref(item.link)}
               target="_blank"
               rel="noopener noreferrer"
               onclick={() => handleOpenItem(item)}
@@ -325,7 +324,7 @@
           </div>
           {#if item.cover && !hiddenCovers.has(item.id)}
             <a
-              href={item.link}
+              href={safeHref(item.link)}
               target="_blank"
               rel="noopener noreferrer"
               onclick={() => handleOpenItem(item)}
@@ -334,13 +333,12 @@
               aria-hidden="true"
             >
               <img
-                src={item.cover}
+                src={coverSrc(item)}
                 alt=""
                 class="h-full w-full bg-neutral-100 object-cover dark:bg-neutral-800"
                 loading="lazy"
-                referrerpolicy="no-referrer"
                 onload={(event) => handleCoverLoad(event, item)}
-                onerror={(event) => handleCoverError(event, item)}
+                onerror={() => handleCoverError(item)}
               />
             </a>
           {/if}
@@ -373,7 +371,7 @@
                       {/if}
                     </div>
                     <a
-                      href={member.link}
+                      href={safeHref(member.link)}
                       target="_blank"
                       rel="noopener noreferrer"
                       onclick={() => handleOpenClusterItem(member)}

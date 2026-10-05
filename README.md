@@ -22,6 +22,7 @@ NanoFlux continuously fetches RSS / Atom feeds, Google News keyword feeds, and W
 - Filtering by source domain, title keyword, and LLM prompt; optional title translation
 - MCP tools for feed management, unconsumed news, filter settings, and Telegram delivery
 - REST API and a password-protected web console
+- Local-only by default, with optional built-in HTTPS, per-client rate limiting of failed credentials, and SSRF protection for everything fetched from feeds
 - Fever API 3 compatibility for feeds, articles, unread items, and read state
 - SQLite persistence, Excel export, PWA support, light/dark themes, and English / Simplified Chinese / Traditional Chinese UI
 
@@ -63,6 +64,8 @@ Once started:
 
 `ADMIN_PASSWORD` must be at least 8 characters and include letters, numbers, and symbols. It protects the console and REST API. MCP accepts local clients only by default and does not use this password.
 
+NanoFlux listens on `127.0.0.1` by default, so these URLs work only on the machine running it. To use it from a phone or another computer, see [Access from Other Devices](#access-from-other-devices).
+
 ### Common Commands
 
 | Command | Purpose |
@@ -102,7 +105,7 @@ Add NanoFlux to an MCP client such as Cursor or Claude Desktop:
 }
 ```
 
-To use MCP from another machine, open **Settings > MCP** and select **Allow remote access**. NanoFlux generates and displays a high-entropy Authorization token without changing the active configuration. Review or copy it, then click **Save** to enable remote access and make that token active. Remote clients must send:
+To use MCP from another machine, first make NanoFlux reachable from it (see [Access from Other Devices](#access-from-other-devices)), then open **Settings > MCP** and select **Allow remote access**. NanoFlux generates and displays a high-entropy Authorization token without changing the active configuration. Review or copy it, then click **Save** to enable remote access and make that token active. Remote clients must send:
 
 ```http
 Authorization: Bearer <your MCP token>
@@ -110,7 +113,9 @@ Authorization: Bearer <your MCP token>
 
 The token is separate from `ADMIN_PASSWORD`; local MCP clients do not need it while remote access is disabled.
 
-Behind a reverse proxy or tunnel, every client reaches NanoFlux from the proxy's address, which is often `127.0.0.1`. NanoFlux therefore treats any request carrying `Forwarded`, `X-Forwarded-For`, or `X-Real-IP` as remote. Make sure the proxy sends one of these headers (for nginx, add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`), and enable remote access with a token for clients that come through it.
+A request counts as local only when it comes from this machine and is addressed to a loopback name (`localhost`, `127.0.0.1`, or `[::1]`). A client on the same machine that uses the LAN IP or a custom hostname in its URL is treated as remote, and so is a browser page served from any other origin.
+
+Behind a reverse proxy or tunnel, every client reaches NanoFlux from the proxy's address, which is often `127.0.0.1`. NanoFlux therefore treats any request carrying `Forwarded`, `X-Forwarded-For`, or `X-Real-IP` as remote. Make sure the proxy sends one of these headers (for nginx, add `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`), and enable remote access with a token for clients that come through it. Failed credentials are rate-limited per client (20 failures per 10 minutes, counted separately for the admin password, the Fever API key, and the MCP token; the admin password counts whether it is sent to the login form or as a `Bearer` header). This limit uses the same headers to tell clients apart when the proxy runs on the same host, so the proxy must set them itself rather than pass through whatever the client sent; without them, every client behind the proxy shares one login budget.
 
 A typical agent workflow is to create feeds with `add_feed`, `add_feed_by_keyword`, or `add_wechat_feed`; optionally set criteria with `update_filter_config`; then call `get_uningested_news` on a schedule. It takes no parameters and returns up to 50 passed first-report items (not duplicates of an earlier item) from the last three days that it has not returned before, ordered by `item_id` ascending. The server remembers the last item returned, so if it returns `hasMore: true`, simply call it again until it returns `false`.
 
@@ -136,6 +141,8 @@ Enable Fever under **Settings → Fever**, then configure your client with:
 - URL: `http://<host>:<port>/fever`
 - Username and password: the Fever credentials saved in Settings
 
+A client on another device needs NanoFlux to be reachable from it; see [Access from Other Devices](#access-from-other-devices) and use the resulting `https://` URL. After 20 wrong API keys in 10 minutes, a client gets `429` until the window expires.
+
 Fever read state maps to `is_read`. Starring is not currently supported.
 
 ## Configuration
@@ -146,8 +153,9 @@ Create `.env` from `.env.example`. These variables are read when the process sta
 
 | Variable | Required | Description |
 | --- | --- | --- |
-| `PORT` | Yes | HTTP port; the example uses `3000` |
-| `HOST` | No | Listen address; defaults to `0.0.0.0` (all interfaces). Set `127.0.0.1` to accept local connections only |
+| `PORT` | Yes | Listen port (HTTP, or HTTPS when the TLS files are set); the example uses `3000` |
+| `HOST` | No | Listen address; defaults to `127.0.0.1` (this machine only). See [Access from Other Devices](#access-from-other-devices) before changing it |
+| `TLS_CERT_FILE` / `TLS_KEY_FILE` | No | PEM certificate (full chain) and private key; when both are set NanoFlux serves HTTPS itself |
 | `ADMIN_PASSWORD` | Yes | Password for the console and REST API |
 | `DB_PATH` | No | SQLite path; defaults to `data.sqlite` |
 | `LLM_BASE_URL` | No | OpenAI-compatible API base URL |
@@ -157,8 +165,7 @@ Create `.env` from `.env.example`. These variables are read when the process sta
 | `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
 | `TELEGRAM_CHANNEL_ID` | No | Channel username (`@channel`) or numeric ID |
 | `FETCH_ALLOW_PRIVATE_HOSTS` | No | Comma-separated hostnames or IPs exempt from the private-address block, such as a LAN RSSHub |
-
-Feed, article, and cover requests are refused when a URL, or any redirect it follows, resolves to a loopback, private, link-local, or other non-public address. This keeps feed content from steering NanoFlux at internal services or cloud metadata endpoints.
+| `FETCH_PROXY_RESOLVES_DNS` | No | `true` lets the outbound proxy resolve hostnames instead of NanoFlux; see below |
 
 Outbound HTTP requests support the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` variables:
 
@@ -166,6 +173,55 @@ Outbound HTTP requests support the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO
 HTTPS_PROXY=http://127.0.0.1:9080
 NO_PROXY=localhost,127.0.0.1
 ```
+
+Feed, article, and cover requests are refused when a URL, or any redirect it follows, resolves to a loopback, private, link-local, or other non-public address. This keeps feed content from steering NanoFlux at internal services or cloud metadata endpoints.
+
+Each hostname is resolved once, and the request is then sent to the address that was checked, so a DNS answer that changes after the check (DNS rebinding) cannot move the connection to an internal host. This also applies behind `HTTP_PROXY` / `HTTPS_PROXY`: the proxy is asked for the checked IP rather than the hostname. Two consequences when a proxy is configured:
+
+- Plain `http://` URLs lose their `Host` header at the proxy, so most of them fail. Set only `HTTPS_PROXY` to send plain HTTP directly.
+- Sites are reached at the address your local DNS returns. If local DNS is unreliable for the sites you read, set `FETCH_PROXY_RESOLVES_DNS=true`. The proxy then resolves hostnames, NanoFlux can no longer verify where proxied requests land, and the proxy itself should refuse private destinations.
+
+### Access from Other Devices
+
+By default NanoFlux serves plain HTTP and listens on `127.0.0.1` only. Over plain HTTP the admin password, the session cookie, the MCP token, and the Fever API key are all readable by anyone on the same network, and the session cookie is marked `Secure` only when the request arrived over HTTPS.
+
+There are two ways to reach NanoFlux from another device: let it serve HTTPS itself, or put an HTTPS reverse proxy in front.
+
+#### Built-in HTTPS
+
+Point `TLS_CERT_FILE` and `TLS_KEY_FILE` at a PEM certificate (full chain) and its private key, and set `HOST` so other machines can connect:
+
+```env
+HOST=0.0.0.0
+PORT=443
+TLS_CERT_FILE=/etc/letsencrypt/live/example.com/fullchain.pem
+TLS_KEY_FILE=/etc/letsencrypt/live/example.com/privkey.pem
+```
+
+- NanoFlux then speaks HTTPS only on `PORT`; there is no plain-HTTP listener and no redirect from port 80.
+- The files are read once at startup, so restart NanoFlux after each renewal (for certbot, in a `--deploy-hook`). A restart signs out every console session.
+- The process must be able to read the key file and, on Linux, to bind a port below 1024: grant `CAP_NET_BIND_SERVICE` (`AmbientCapabilities=` in a systemd unit) or use a high port such as `8443`.
+- Do not also run a reverse proxy in front on the same machine without the headers below.
+
+#### Reverse proxy
+
+Keep `HOST` at its default and put a reverse proxy that terminates HTTPS (Caddy, nginx, or a tunnel such as Tailscale Serve or Cloudflare Tunnel) on the same machine, forwarding to `http://127.0.0.1:<PORT>`. The proxy must send:
+
+- `X-Forwarded-Proto: https`, so the session cookie is issued with `Secure`
+- `X-Forwarded-For` (or `X-Real-IP` / `Forwarded`), set by the proxy itself, so proxied clients are treated as remote for MCP and rate-limited separately at login
+
+For nginx:
+
+```nginx
+location / {
+    proxy_pass http://127.0.0.1:3000;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header X-Forwarded-For $remote_addr;
+}
+```
+
+If the proxy runs on a different machine, set `HOST` to the address of the interface it connects through, and make sure that link is itself trusted or encrypted. Without the TLS variables, `HOST=0.0.0.0` listens on every interface over plain HTTP; use it only on a network you fully trust. NanoFlux logs a warning at startup whenever `HOST` is not a loopback address and TLS is off.
 
 ### `config.json`
 
@@ -211,6 +267,14 @@ NO_PROXY=localhost,127.0.0.1
 - When an RSS summary is too short, NanoFlux attempts to fetch and extract the full article. Images come from RSS media fields first, then article metadata or body images.
 - Only items with `status = "passed"` appear in MCP, REST, the console, and exports. LLM-rejected items remain as `rejected` to prevent re-ingestion; manually removed items are `deleted`.
 - Items older than 90 days are permanently removed.
+- Feed URLs must be `http://` or `https://`. Items whose link uses any other scheme (such as `javascript:`) are skipped.
+
+## Security Notes
+
+- Console sessions last 7 days and are kept in memory: signing out revokes the session on the server, and a restart signs out everyone.
+- Failed credentials are limited to 20 per client per 10 minutes, counted separately for the admin password, the Fever API key, and the MCP token. A blocked client receives `429`; an already signed-in session keeps working.
+- Every response carries a strict `Content-Security-Policy` (same-origin scripts and styles only, no inline script, no framing), `X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`.
+- Cover images in the console load through NanoFlux (`/api/items/:id/cover`) rather than from the publisher, so image hosts do not see the reader's IP address.
 
 ## REST API
 
@@ -219,6 +283,8 @@ All REST endpoints except `/api/auth/*` require either a session cookie created 
 ```http
 Authorization: Bearer <ADMIN_PASSWORD>
 ```
+
+Requests without valid credentials get `401`; a client that has exceeded the failed-credential limit gets `429`.
 
 JSON responses use `{ "code": 0, "message": "", "data": ... }`; download endpoints are the exception.
 
@@ -261,6 +327,7 @@ db/          Drizzle schema and data access
 fever/       Fever protocol implementation
 mcp/         MCP route and tools
 services/    Fetching, parsing, filtering, translation, scheduling, and Telegram
+shared/      Environment, authentication, access control, and security headers
 web/         Svelte 5 web console
 drizzle/     SQLite migrations
 public/      Built static assets

@@ -13,6 +13,7 @@ import {
 import { db } from "./database";
 import { feeds, type Feed, DEFAULT_LIMIT, MAX_LIMIT } from "./schema";
 import { decodeCursor, parseFeedId } from "./utils";
+import { isHttpUrl } from "../shared/url";
 
 export type FeedSort = "updated_desc" | "published_desc" | "published_asc";
 
@@ -168,6 +169,10 @@ export function createFeed(
     description?: string | null;
   }
 ): Feed {
+
+  if (!isHttpUrl(input.url)) {
+    throw new Error("Failed to create feed: URL must be http or https");
+  }
 
   try {
 

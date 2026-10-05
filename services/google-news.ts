@@ -1,3 +1,4 @@
+import { isHttpUrl } from "../shared/url";
 import { httpGet, httpPost } from "./http-fetcher";
 
 export {
@@ -188,5 +189,6 @@ async function resolveGoogleNewsArticleUrl(
 /** Resolve Google News redirects; pass through other URLs unchanged. */
 export async function resolveArticleUrl(url: string): Promise<string> {
   if (!isGoogleNewsArticleUrl(url)) return url;
-  return (await resolveGoogleNewsArticleUrl(url)) ?? url;
+  const resolved = await resolveGoogleNewsArticleUrl(url);
+  return resolved && isHttpUrl(resolved) ? resolved : url;
 }

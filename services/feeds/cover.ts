@@ -1,4 +1,5 @@
 import type Parser from "rss-parser";
+import { isHttpUrl } from "../../shared/url";
 
 const IMAGE_EXT = /\.(?:jpe?g|png|gif|webp|avif|bmp|svg)(?:[?#]|$)/i;
 const META_TAG = /<meta\b[^>]*>/gi;
@@ -41,15 +42,6 @@ function parseAttrs(tag: string): Record<string, string> {
     attrs[name] = decodeEntities(raw.trim());
   }
   return attrs;
-}
-
-function isHttpUrl(value: string): boolean {
-  try {
-    const parsed = new URL(value);
-    return parsed.protocol === "http:" || parsed.protocol === "https:";
-  } catch {
-    return false;
-  }
 }
 
 function looksLikeImageUrl(value: string): boolean {
