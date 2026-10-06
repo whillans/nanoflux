@@ -15,11 +15,11 @@
 
   // Fixed order, bottom of the stack first. Colors follow the status, never its rank.
   const SERIES: { key: Series; label: MessageKey; color: string }[] = [
-    { key: "rejected", label: "stats.rejected", color: "bg-[#eb6834] dark:bg-[#d95926]" },
-    { key: "duplicates", label: "stats.duplicates", color: "bg-[#1baf7a] dark:bg-[#199e70]" },
     { key: "firstReports", label: "items.firstReport", color: "bg-[#2a78d6] dark:bg-[#3987e5]" },
+    { key: "duplicates", label: "stats.duplicates", color: "bg-[#1baf7a] dark:bg-[#199e70]" },
+    { key: "rejected", label: "stats.rejected", color: "bg-[#eb6834] dark:bg-[#d95926]" },
   ];
-  const BAR_COLOR = SERIES.at(-1)!.color;
+  const BAR_COLOR = SERIES[0]!.color;
 
   const labelClass = "text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500";
 
