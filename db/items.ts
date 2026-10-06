@@ -277,6 +277,121 @@ export function getItemsForExport(options: {
   }
 }
 
+export type ItemStatusCounts = { total: number; passed: number; rejected: number; deleted: number };
+
+export type ItemStats = {
+  overview: ItemStatusCounts & { duplicates: number; unread: number };
+  /** Non-empty buckets only, oldest first; `bucket` is local `YYYY-MM-DD` or `YYYY-MM-DD HH`. */
+  trend: (ItemStatusCounts & { bucket: string })[];
+  byFeed: { feed_id: number; title: string; total: number; passed: number }[];
+  bySource: { source: string; total: number; passed: number }[];
+  /** Rejected items by filter; `ai` is every rejection without a rule prefix. */
+  byReason: { source: number; keyword: number; ai: number };
+};
+
+const STATS_TOP_N = 10;
+
+/** Aggregate counts over `published_at`, bucketed in the caller's local time. */
+export function getItemStats(options: {
+  since?: string;
+  until?: string;
+  /** `Date#getTimezoneOffset()` of the viewer: UTC minus local, in minutes. */
+  tzOffsetMin: number;
+  bucket: "hour" | "day";
+}): ItemStats {
+  try {
+    const range = and(
+      options.since ? gte(items.published_at, options.since) : undefined,
+      options.until ? lte(items.published_at, options.until) : undefined,
+    );
+
+    const countWhere = (condition: ReturnType<typeof sql>) =>
+      sql<number>`coalesce(sum(case when ${condition} then 1 else 0 end), 0)`;
+    const total = sql<number>`count(*)`;
+    const passed = countWhere(sql`${items.status} = 'passed'`);
+    const rejected = countWhere(sql`${items.status} = 'rejected'`);
+    const deleted = countWhere(sql`${items.status} = 'deleted'`);
+
+    const overview = db
+      .select({
+        total,
+        passed,
+        rejected,
+        deleted,
+        duplicates: countWhere(sql`${items.status} = 'passed' and ${items.sim_id} is not null`),
+        unread: countWhere(sql`${items.status} = 'passed' and ${items.is_read} = 0`),
+      })
+      .from(items)
+      .where(range)
+      .get()!;
+
+    const localMinutes = -Math.trunc(options.tzOffsetMin);
+    const modifier = `${localMinutes >= 0 ? "+" : ""}${localMinutes} minutes`;
+    const format = options.bucket === "hour" ? "%Y-%m-%d %H" : "%Y-%m-%d";
+    const trend = db
+      .select({
+        bucket: sql<string>`strftime(${format}, ${items.published_at}, ${modifier})`,
+        total,
+        passed,
+        rejected,
+        deleted,
+      })
+      .from(items)
+      .where(range)
+      .groupBy(sql`1`)
+      .orderBy(sql`1`)
+      .all()
+      // An unparseable published_at has no bucket.
+      .filter((row) => row.bucket !== null);
+
+    const byFeed = db
+      .select({ feed_id: items.feed_id, title: feeds.title, total, passed })
+      .from(items)
+      .innerJoin(feeds, eq(items.feed_id, feeds.id))
+      .where(range)
+      .groupBy(items.feed_id)
+      .orderBy(desc(total), asc(items.feed_id))
+      .limit(STATS_TOP_N)
+      .all();
+
+    const bySource = db
+      .select({ source: items.source, total, passed })
+      .from(items)
+      .where(and(range, sql`${items.source} <> ''`))
+      .groupBy(items.source)
+      .orderBy(desc(total), asc(items.source))
+      .limit(STATS_TOP_N)
+      .all();
+
+    const bySourceRule = sql`${items.status_reason} like 'Source filter:%'`;
+    const byKeywordRule = sql`${items.status_reason} like 'Keyword filter:%'`;
+    const reasons = db
+      .select({
+        total,
+        source: countWhere(bySourceRule),
+        keyword: countWhere(byKeywordRule),
+      })
+      .from(items)
+      .where(and(range, eq(items.status, "rejected")))
+      .get()!;
+
+    return {
+      overview,
+      trend,
+      byFeed,
+      bySource,
+      byReason: {
+        source: reasons.source,
+        keyword: reasons.keyword,
+        ai: reasons.total - reasons.source - reasons.keyword,
+      },
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to get item stats: ${detail}`);
+  }
+}
+
 export function getExistingGuids(guids: string[]): Set<string> {
   if (guids.length === 0) return new Set();
 

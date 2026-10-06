@@ -23,7 +23,7 @@ NanoFlux continuously fetches RSS / Atom feeds, Google News keyword feeds, and W
 - REST API and a password-protected web console
 - Local-only by default, with optional built-in HTTPS, per-client rate limiting of failed credentials, and SSRF protection for everything fetched from feeds
 - Fever API 3 compatibility for feeds, articles, unread items, and read state
-- SQLite persistence, Excel export, PWA support, light/dark themes, and English / Simplified Chinese / Traditional Chinese UI
+- SQLite persistence, news statistics, Excel export, PWA support, light/dark themes, and English / Simplified Chinese / Traditional Chinese UI
 
 ## Quick Start
 
@@ -87,6 +87,7 @@ Sign in with `ADMIN_PASSWORD` to:
 - Add, preview, edit, or remove RSS feeds, and subscribe to Google News by keyword
 - Configure filtering, title translation, Fever credentials, and display preferences
 - Browse unread or all news, block a source, and export to Excel
+- Review statistics for the last 24 hours, 7 days, or 30 days: fetched, passed, filtered, deleted, duplicate, and unread counts, a trend chart, the top feeds and sources, and why items were filtered
 
 New feeds are fetched immediately; there is no need to wait for the next scheduler run.
 
@@ -299,13 +300,14 @@ JSON responses use `{ "code": 0, "message": "", "data": ... }`; download endpoin
 | Feeds | `POST /api/feeds/meta`, `GET /api/feeds/export.opml` | Preview feed metadata and export OPML |
 | WeChat | `GET /api/feeds/wechat/accounts`, `POST /api/feeds/wechat/resolve` | Search for and subscribe to official accounts |
 | Items | `GET /api/items`, `GET /api/items/export.xlsx` | List news and export Excel |
+| Items | `GET /api/items/stats` | Count news by status, time bucket, feed, source, and filter reason |
 | Items | `POST /api/items/:id/read`, `POST /api/items/read-all` | Mark items as read |
 | Items | `POST /api/items/block-source` | Block a source and hide current visible news from it |
 | Settings | `GET` / `POST /api/filter` | Filter settings |
 | Settings | `GET` / `POST /api/translate` | Translation settings |
 | Settings | `GET` / `POST /api/fever` | Fever configuration, not the Fever protocol itself |
 
-List endpoints support `cursor` and `limit` (default 20, maximum 50). `GET /api/items` also accepts `is_read=0|1`, `since`, `until`, or `unit` plus `count` for time filtering. Excel export supports `since`, `until`, `tz_offset`, and `lang`.
+List endpoints support `cursor` and `limit` (default 20, maximum 50). `GET /api/items` also accepts `is_read=0|1`, `since`, `until`, or `unit` plus `count` for time filtering. Excel export supports `since`, `until`, `tz_offset`, and `lang`. `GET /api/items/stats` supports `since`, `until`, `tz_offset`, and `bucket=hour|day`; it counts by `published_at` and, unlike the list, includes rejected and deleted items.
 
 ## Background Mode and Autostart
 

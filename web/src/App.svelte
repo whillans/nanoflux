@@ -4,6 +4,7 @@
   import FeedsManager from "./components/FeedsManager.svelte";
   import SettingsManager from "./components/SettingsManager.svelte";
   import ExportPage from "./components/ExportPage.svelte";
+  import StatsPage from "./components/StatsPage.svelte";
   import NewsList from "./components/ItemList.svelte";
   import LoginGate from "./components/LoginGate.svelte";
   import { authState, initAuth } from "./lib/auth.svelte";
@@ -35,6 +36,8 @@
         <div class="mx-auto max-w-page px-5 py-10 md:py-16">
           {#if $route === "/feeds"}
             <FeedsManager />
+          {:else if $route === "/stats"}
+            <StatsPage />
           {:else if $route === "/export"}
             <ExportPage />
           {:else}
