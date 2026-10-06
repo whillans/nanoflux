@@ -390,9 +390,12 @@ export async function blockSource(source: string): Promise<{ deleted: number }> 
 }
 
 export type FilterConfig = {
-  prompt: string;
+  question: string;
+  keepCriteria: string;
+  rejectCriteria: string;
   enabled: boolean;
-  keywords: string;
+  allowKeywords: string;
+  blockKeywords: string;
   sources: string[];
 };
 
@@ -406,18 +409,33 @@ function normalizeFilterConfig(
   data: Partial<FilterConfig> | undefined,
   defaults?: Partial<FilterConfig>,
 ): FilterConfig {
-  const prompt =
-    typeof data?.prompt === "string" ? data.prompt : (defaults?.prompt ?? "");
-  const keywords =
-    typeof data?.keywords === "string"
-      ? data.keywords
-      : (defaults?.keywords ?? "");
+  const question =
+    typeof data?.question === "string" ? data.question : (defaults?.question ?? "");
+  const keepCriteria =
+    typeof data?.keepCriteria === "string"
+      ? data.keepCriteria
+      : (defaults?.keepCriteria ?? "");
+  const rejectCriteria =
+    typeof data?.rejectCriteria === "string"
+      ? data.rejectCriteria
+      : (defaults?.rejectCriteria ?? "");
+  const allowKeywords =
+    typeof data?.allowKeywords === "string"
+      ? data.allowKeywords
+      : (defaults?.allowKeywords ?? "");
+  const blockKeywords =
+    typeof data?.blockKeywords === "string"
+      ? data.blockKeywords
+      : (defaults?.blockKeywords ?? "");
   const sources = Array.isArray(data?.sources)
     ? data.sources.filter((source): source is string => typeof source === "string")
     : (defaults?.sources ?? []);
   return {
-    prompt,
-    keywords,
+    question,
+    keepCriteria,
+    rejectCriteria,
+    allowKeywords,
+    blockKeywords,
     sources,
     enabled:
       typeof data?.enabled === "boolean"
@@ -438,9 +456,12 @@ export async function fetchFilter(): Promise<FilterConfig> {
 }
 
 export function updateFilter(payload: {
-  prompt?: string;
+  question?: string;
+  keepCriteria?: string;
+  rejectCriteria?: string;
   enabled?: boolean;
-  keywords?: string;
+  allowKeywords?: string;
+  blockKeywords?: string;
   sources?: string[];
 }) {
   return request<FilterApiResult>("/api/filter", {
@@ -478,16 +499,20 @@ export type TranslateConfig = {
   targetLang: TranslateTargetLang;
 };
 
+export type TranslatePrompts = Partial<Record<TranslateTargetLang, string>>;
+
+export type TranslateState = TranslateConfig & { prompts: TranslatePrompts };
+
 type TranslateApiResult = {
   code: number;
   message: string;
-  data?: Partial<TranslateConfig>;
+  data?: Partial<TranslateState>;
 };
 
 function normalizeTranslateConfig(
-  data: Partial<TranslateConfig> | undefined,
+  data: Partial<TranslateState> | undefined,
   defaults?: Partial<TranslateConfig>,
-): TranslateConfig {
+): TranslateState {
   const targetLang: TranslateTargetLang =
     parseTranslateTargetLang(data?.targetLang) ??
     parseTranslateTargetLang(defaults?.targetLang) ??
@@ -500,10 +525,11 @@ function normalizeTranslateConfig(
           ? defaults.enabled
           : false,
     targetLang,
+    prompts: data?.prompts ?? {},
   };
 }
 
-export async function fetchTranslate(): Promise<TranslateConfig> {
+export async function fetchTranslate(): Promise<TranslateState> {
   const body = await request<TranslateApiResult>("/api/translate");
   assertApiOk(body);
   if (!body.data) {
@@ -535,13 +561,22 @@ export type DedupConfig = {
   maxCandidates: number;
 };
 
+/** The fixed prompt the server asks the LLM per candidate (read-only). */
+export type DedupPrompt = {
+  question: string;
+  duplicateCriteria: string;
+  distinctCriteria: string;
+};
+
+export type DedupState = DedupConfig & { prompt: DedupPrompt };
+
 type DedupApiResult = {
   code: number;
   message: string;
-  data?: DedupConfig;
+  data?: DedupState;
 };
 
-export async function fetchDedup(): Promise<DedupConfig> {
+export async function fetchDedup(): Promise<DedupState> {
   const body = await request<DedupApiResult>("/api/dedup");
   assertApiOk(body);
   if (!body.data) {

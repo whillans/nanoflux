@@ -1,51 +1,66 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import Segmented from "./settings/Segmented.svelte";
+  import SettingRow from "./settings/SettingRow.svelte";
   import { fetchFilter, updateFilter } from "../lib/api";
+  import {
+    fieldLabelClass,
+    groupHintClass,
+    inputClass,
+    pageHintClass,
+    saveButtonClass,
+    sectionListClass,
+  } from "../lib/formStyles";
   import { t } from "../lib/locale.svelte";
 
-  const inputClass =
-    "w-full border-0 border-b border-neutral-200 bg-transparent py-2 text-sm outline-none placeholder:text-neutral-300 focus:border-neutral-900 dark:border-neutral-700 dark:placeholder:text-neutral-600 dark:focus:border-neutral-100";
-  const textareaClass = "min-h-48 resize-y " + inputClass;
-
-  let prompt = $state("");
+  let question = $state("");
+  let keepCriteria = $state("");
+  let rejectCriteria = $state("");
   let enabled = $state(false);
-  let keywords = $state("");
+  let allowKeywords = $state("");
+  let blockKeywords = $state("");
   let sources = $state<string[]>([]);
   let sourceInput = $state("");
-  let savedPrompt = $state("");
+  let savedQuestion = $state("");
+  let savedKeepCriteria = $state("");
+  let savedRejectCriteria = $state("");
   let savedEnabled = $state(false);
-  let savedKeywords = $state("");
+  let savedAllowKeywords = $state("");
+  let savedBlockKeywords = $state("");
   let savedSources = $state<string[]>([]);
   let formError = $state("");
   let loading = $state(true);
   let saving = $state(false);
 
   const isDirty = $derived(
-    prompt.trim() !== savedPrompt ||
+    question.trim() !== savedQuestion ||
+      keepCriteria.trim() !== savedKeepCriteria ||
+      rejectCriteria.trim() !== savedRejectCriteria ||
       enabled !== savedEnabled ||
-      keywords.trim() !== savedKeywords ||
+      allowKeywords.trim() !== savedAllowKeywords ||
+      blockKeywords.trim() !== savedBlockKeywords ||
       sources.join("\u0000") !== savedSources.join("\u0000"),
   );
   const saveDisabled = $derived(saving || loading || !isDirty);
-
-  function toggleClass(active: boolean): string {
-    return active
-      ? "text-neutral-900 underline underline-offset-4 decoration-neutral-900 dark:text-neutral-100 dark:decoration-neutral-100"
-      : "text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300";
-  }
 
   async function loadFilter() {
     formError = "";
     loading = true;
     try {
       const filter = await fetchFilter();
-      prompt = filter.prompt;
+      question = filter.question;
+      keepCriteria = filter.keepCriteria;
+      rejectCriteria = filter.rejectCriteria;
       enabled = filter.enabled;
-      keywords = filter.keywords;
+      allowKeywords = filter.allowKeywords;
+      blockKeywords = filter.blockKeywords;
       sources = filter.sources;
-      savedPrompt = filter.prompt;
+      savedQuestion = filter.question;
+      savedKeepCriteria = filter.keepCriteria;
+      savedRejectCriteria = filter.rejectCriteria;
       savedEnabled = filter.enabled;
-      savedKeywords = filter.keywords;
+      savedAllowKeywords = filter.allowKeywords;
+      savedBlockKeywords = filter.blockKeywords;
       savedSources = filter.sources;
     } catch (e) {
       formError = e instanceof Error ? e.message : t("filters.loadFailed");
@@ -61,17 +76,26 @@
 
     try {
       const updated = await updateFilter({
-        prompt: prompt.trim(),
+        question: question.trim(),
+        keepCriteria: keepCriteria.trim(),
+        rejectCriteria: rejectCriteria.trim(),
         enabled,
-        keywords: keywords.trim(),
+        allowKeywords: allowKeywords.trim(),
+        blockKeywords: blockKeywords.trim(),
         sources,
       });
-      prompt = updated.prompt;
+      question = updated.question;
+      keepCriteria = updated.keepCriteria;
+      rejectCriteria = updated.rejectCriteria;
       enabled = updated.enabled;
-      savedPrompt = updated.prompt;
+      savedQuestion = updated.question;
+      savedKeepCriteria = updated.keepCriteria;
+      savedRejectCriteria = updated.rejectCriteria;
       savedEnabled = updated.enabled;
-      keywords = updated.keywords;
-      savedKeywords = updated.keywords;
+      allowKeywords = updated.allowKeywords;
+      savedAllowKeywords = updated.allowKeywords;
+      blockKeywords = updated.blockKeywords;
+      savedBlockKeywords = updated.blockKeywords;
       sources = updated.sources;
       savedSources = updated.sources;
     } catch (err) {
@@ -112,50 +136,31 @@
 </script>
 
 <section class="mb-10">
-  <p class="mb-6 text-sm text-neutral-400 dark:text-neutral-500">
-    {t("filters.hint")}
-  </p>
+  <p class={pageHintClass}>{t("filters.hint")}</p>
   {#if loading}
     <p class="text-sm text-neutral-300 dark:text-neutral-600">{t("items.loading")}</p>
   {:else}
-    <div class="space-y-8">
-      <div class="space-y-3">
-        <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-          {t("filters.enabled")}
-        </span>
-        <div
-          class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm"
-          role="group"
-          aria-label={t("filters.enabled")}
-        >
-          <button
-            type="button"
-            class="transition-colors {toggleClass(enabled)}"
-            aria-pressed={enabled}
-            disabled={saving}
-            onclick={() => (enabled = true)}
-          >
-            {t("filters.on")}
-          </button>
-          <button
-            type="button"
-            class="transition-colors {toggleClass(!enabled)}"
-            aria-pressed={!enabled}
-            disabled={saving}
-            onclick={() => (enabled = false)}
-          >
-            {t("filters.off")}
-          </button>
-        </div>
-      </div>
+    <div class={sectionListClass}>
+      <SettingRow label={t("filters.enabled")}>
+        <Segmented
+          label={t("filters.enabled")}
+          value={enabled}
+          options={[
+            { value: true, label: t("filters.on") },
+            { value: false, label: t("filters.off") },
+          ]}
+          disabled={saving}
+          onchange={(next) => (enabled = next)}
+        />
+      </SettingRow>
 
-      <div class="space-y-3">
-        <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-          {t("filters.sources")}
-        </span>
-        <div class="flex min-h-11 flex-wrap items-center gap-2 border-b border-neutral-200 py-2 focus-within:border-neutral-900 dark:border-neutral-700 dark:focus-within:border-neutral-100">
+      <div class="space-y-2 py-6">
+        <label for="filter-sources" class={fieldLabelClass}>{t("filters.sources")}</label>
+        <div
+          class="flex min-h-11 flex-wrap items-center gap-2 rounded-lg border border-neutral-200 px-2 py-1.5 transition-colors focus-within:border-neutral-900 dark:border-neutral-700 dark:focus-within:border-neutral-100"
+        >
           {#each sources as source}
-            <span class="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2.5 py-1 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
+            <span class="inline-flex items-center gap-1 rounded-md bg-neutral-100 px-2 py-1 text-xs text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
               {source}
               <button
                 type="button"
@@ -167,8 +172,9 @@
             </span>
           {/each}
           <input
+            id="filter-sources"
             bind:value={sourceInput}
-            class="min-w-40 flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-300 dark:placeholder:text-neutral-600"
+            class="min-w-40 flex-1 bg-transparent px-1 text-sm outline-none placeholder:text-neutral-300 dark:placeholder:text-neutral-600"
             disabled={saving}
             placeholder={t("filters.sourcesPlaceholder")}
             onkeydown={handleSourceKeydown}
@@ -177,34 +183,68 @@
         </div>
       </div>
 
-      <label class="block space-y-3">
-        <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-          {t("filters.keywords")}
-        </span>
-        <textarea
-          bind:value={keywords}
-          class="min-h-32 resize-y {inputClass}"
-          disabled={saving}
-          placeholder={t("filters.keywordsPlaceholder")}
-        ></textarea>
-      </label>
+      <div class="space-y-5 py-6">
+        <p class={groupHintClass}>{t("filters.keywordsHint")}</p>
+        <label class="block space-y-2">
+          <span class={fieldLabelClass}>{t("filters.allowKeywords")}</span>
+          <textarea
+            bind:value={allowKeywords}
+            class="min-h-20 w-full resize-y {inputClass}"
+            disabled={saving}
+            placeholder={t("filters.allowKeywordsPlaceholder")}
+          ></textarea>
+        </label>
+        <label class="block space-y-2">
+          <span class={fieldLabelClass}>{t("filters.blockKeywords")}</span>
+          <textarea
+            bind:value={blockKeywords}
+            class="min-h-20 w-full resize-y {inputClass}"
+            disabled={saving}
+            placeholder={t("filters.blockKeywordsPlaceholder")}
+          ></textarea>
+        </label>
+      </div>
 
-      <label class="block space-y-3">
-        <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-          {t("filters.prompt")}
-        </span>
-        <textarea bind:value={prompt} class={textareaClass} disabled={saving}></textarea>
-      </label>
-
-      <button
-        type="button"
-        disabled={saveDisabled}
-        class="text-sm text-neutral-900 underline-offset-4 hover:underline disabled:opacity-50 dark:text-neutral-100"
-        onclick={() => void handleSave()}
-      >
-        {saving ? t("filters.saving") : t("filters.save")}
-      </button>
+      <div class="space-y-5 py-6">
+        <p class={groupHintClass}>{t("filters.aiHint")}</p>
+        <label class="block space-y-2">
+          <span class={fieldLabelClass}>{t("filters.question")}</span>
+          <input
+            bind:value={question}
+            class="w-full {inputClass}"
+            disabled={saving}
+            placeholder={t("filters.questionPlaceholder")}
+          />
+        </label>
+        <label class="block space-y-2">
+          <span class={fieldLabelClass}>{t("filters.keepCriteria")}</span>
+          <textarea
+            bind:value={keepCriteria}
+            class="min-h-24 w-full resize-y {inputClass}"
+            disabled={saving}
+            placeholder={t("filters.keepCriteriaPlaceholder")}
+          ></textarea>
+        </label>
+        <label class="block space-y-2">
+          <span class={fieldLabelClass}>{t("filters.rejectCriteria")}</span>
+          <textarea
+            bind:value={rejectCriteria}
+            class="min-h-24 w-full resize-y {inputClass}"
+            disabled={saving}
+            placeholder={t("filters.rejectCriteriaPlaceholder")}
+          ></textarea>
+        </label>
+      </div>
     </div>
+
+    <button
+      type="button"
+      disabled={saveDisabled}
+      class="mt-2 {saveButtonClass}"
+      onclick={() => void handleSave()}
+    >
+      {saving ? t("filters.saving") : t("filters.save")}
+    </button>
   {/if}
   {#if formError}
     <p class="mt-3 text-sm text-red-500">{formError}</p>

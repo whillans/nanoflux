@@ -1,102 +1,76 @@
 <script lang="ts">
+  import Moon from "@lucide/svelte/icons/moon";
+  import Sun from "@lucide/svelte/icons/sun";
+  import Segmented from "./settings/Segmented.svelte";
+  import SettingRow from "./settings/SettingRow.svelte";
+  import { pageHintClass, sectionListClass } from "../lib/formStyles";
   import { fontSizeState, setFontSize, type FontSize } from "../lib/fontSize.svelte";
   import { localeState, setLocale, t } from "../lib/locale.svelte";
   import { themeState, setTheme, type Theme } from "../lib/theme.svelte";
   import type { Locale } from "../lib/i18n/messages";
 
-  function optionClass(active: boolean): string {
-    return active
-      ? "text-neutral-900 underline underline-offset-4 decoration-neutral-900 dark:text-neutral-100 dark:decoration-neutral-100"
-      : "text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300";
-  }
-
-  const fontOptions: { id: FontSize; key: "font.small" | "font.medium" | "font.large" }[] = [
-    { id: "small", key: "font.small" },
-    { id: "medium", key: "font.medium" },
-    { id: "large", key: "font.large" },
-  ];
-
-  const localeOptions: { id: Locale; key: "lang.en" | "lang.zhHans" | "lang.zhHant" }[] = [
-    { id: "en", key: "lang.en" },
-    { id: "zh-Hans", key: "lang.zhHans" },
-    { id: "zh-Hant", key: "lang.zhHant" },
-  ];
-
-  const themeOptions: { id: Theme; key: "theme.lightMode" | "theme.darkMode" }[] = [
-    { id: "light", key: "theme.lightMode" },
-    { id: "dark", key: "theme.darkMode" },
-  ];
+  // Glyph sizes are fixed so the preview does not scale with the setting itself.
+  const fontGlyphClass: Record<FontSize, string> = {
+    small: "text-[12px]",
+    medium: "text-[15px]",
+    large: "text-[18px]",
+  };
 </script>
 
 <section class="mb-10">
-  <p class="mb-6 text-sm text-neutral-400 dark:text-neutral-500">
-    {t("prefs.hint")}
-  </p>
-  <div class="space-y-8">
-    <div class="space-y-3">
-      <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-        {t("prefs.fontSize")}
-      </span>
-      <div
-        class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm"
-        role="group"
-        aria-label={t("prefs.fontSize")}
+  <p class={pageHintClass}>{t("prefs.hint")}</p>
+  <div class={sectionListClass}>
+    <SettingRow label={t("prefs.fontSize")}>
+      <Segmented
+        label={t("prefs.fontSize")}
+        value={fontSizeState.mode}
+        options={[
+          { value: "small" as FontSize, label: t("font.small") },
+          { value: "medium" as FontSize, label: t("font.medium") },
+          { value: "large" as FontSize, label: t("font.large") },
+        ]}
+        onchange={setFontSize}
       >
-        {#each fontOptions as option (option.id)}
-          <button
-            type="button"
-            class="cursor-pointer transition-colors {optionClass(fontSizeState.mode === option.id)}"
-            aria-pressed={fontSizeState.mode === option.id}
-            onclick={() => setFontSize(option.id)}
-          >
-            {t(option.key)}
-          </button>
-        {/each}
-      </div>
-    </div>
+        {#snippet item(size: FontSize)}
+          <span class="{fontGlyphClass[size]} leading-none" aria-hidden="true">A</span>
+        {/snippet}
+      </Segmented>
+    </SettingRow>
 
-    <div class="space-y-3">
-      <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-        {t("prefs.language")}
-      </span>
-      <div
-        class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm"
-        role="group"
-        aria-label={t("prefs.language")}
-      >
-        {#each localeOptions as option (option.id)}
-          <button
-            type="button"
-            class="cursor-pointer transition-colors {optionClass(localeState.locale === option.id)}"
-            aria-pressed={localeState.locale === option.id}
-            onclick={() => setLocale(option.id)}
-          >
-            {t(option.key)}
-          </button>
-        {/each}
-      </div>
-    </div>
+    <!-- Languages are shown in their own names so they stay recognisable in any locale. -->
+    <SettingRow label={t("prefs.language")}>
+      <Segmented
+        label={t("prefs.language")}
+        value={localeState.locale}
+        options={[
+          { value: "en" as Locale, label: "English", title: t("lang.en"), lang: "en" },
+          { value: "zh-Hans" as Locale, label: "简体中文", title: t("lang.zhHans"), lang: "zh-Hans" },
+          { value: "zh-Hant" as Locale, label: "繁體中文", title: t("lang.zhHant"), lang: "zh-Hant" },
+        ]}
+        onchange={setLocale}
+      />
+    </SettingRow>
 
-    <div class="space-y-3">
-      <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">
-        {t("prefs.theme")}
-      </span>
-      <div
-        class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm"
-        role="group"
-        aria-label={t("prefs.theme")}
+    <SettingRow label={t("prefs.theme")}>
+      <Segmented
+        label={t("prefs.theme")}
+        value={themeState.mode}
+        options={[
+          { value: "light" as Theme, label: t("theme.lightMode") },
+          { value: "dark" as Theme, label: t("theme.darkMode") },
+        ]}
+        onchange={setTheme}
       >
-        {#each themeOptions as option (option.id)}
-          <button
-            type="button"
-            class="cursor-pointer transition-colors {optionClass(themeState.mode === option.id)}"
-            aria-pressed={themeState.mode === option.id}
-            onclick={() => setTheme(option.id)}
-          >
-            {t(option.key)}
-          </button>
-        {/each}
-      </div>
-    </div>
+        {#snippet item(mode: Theme)}
+          {#if mode === "dark"}
+            <Moon size={15} strokeWidth={1.5} aria-hidden="true" />
+            {t("theme.darkMode")}
+          {:else}
+            <Sun size={15} strokeWidth={1.5} aria-hidden="true" />
+            {t("theme.lightMode")}
+          {/if}
+        {/snippet}
+      </Segmented>
+    </SettingRow>
   </div>
 </section>

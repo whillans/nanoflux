@@ -9,9 +9,17 @@ export type TranslateTargetLang = (typeof TRANSLATE_TARGET_LANGS)[number];
 export const DEFAULT_TRANSLATE_TARGET_LANG: TranslateTargetLang = "zh-Hans";
 
 export type FilterConfig = {
-  prompt: string;
+  /** Yes/no question the AI filter asks about each item; empty uses the default. */
+  question: string;
+  /** What a "yes" answer looks like: news to keep. */
+  keepCriteria: string;
+  /** What a "no" answer looks like: news to reject. */
+  rejectCriteria: string;
   enabled: boolean;
-  keywords: string;
+  /** Comma-separated title keywords that pass without blocklist or AI checks. */
+  allowKeywords: string;
+  /** Comma-separated title keywords that reject an item. */
+  blockKeywords: string;
   sources: string[];
 };
 
@@ -121,12 +129,25 @@ function clampedNumber(
 
 // Each section fills missing fields with defaults; a field of the wrong type
 // is an error, so a hand-edited mistake is reported instead of dropped.
-const FilterSchema = z.object({
-  prompt: z.string().default(""),
-  enabled: z.boolean().default(false),
-  keywords: z.string().default(""),
-  sources: z.array(z.string()).default(() => []).transform(normalizeFilterSources),
-});
+const FilterSchema = z
+  .object({
+    question: z.string().default(""),
+    keepCriteria: z.string().default(""),
+    rejectCriteria: z.string().default(""),
+    /** Legacy free-form criteria, now `keepCriteria`; read once and dropped on the next save. */
+    prompt: z.string().optional(),
+    enabled: z.boolean().default(false),
+    allowKeywords: z.string().default(""),
+    blockKeywords: z.string().default(""),
+    /** Legacy name of `blockKeywords`; read once and dropped on the next save. */
+    keywords: z.string().optional(),
+    sources: z.array(z.string()).default(() => []).transform(normalizeFilterSources),
+  })
+  .transform(({ keywords, prompt, ...filter }) => ({
+    ...filter,
+    keepCriteria: filter.keepCriteria || prompt || "",
+    blockKeywords: filter.blockKeywords || keywords || "",
+  }));
 
 const TranslateSchema = z.object({
   enabled: z.boolean().default(false),
@@ -293,19 +314,31 @@ export function generateMcpAuthorization(): string {
 }
 
 export async function updateFilterState(partial: {
-  prompt?: string;
+  question?: string;
+  keepCriteria?: string;
+  rejectCriteria?: string;
   enabled?: boolean;
-  keywords?: string;
+  allowKeywords?: string;
+  blockKeywords?: string;
   sources?: string[];
 }): Promise<FilterConfig> {
-  if (typeof partial.prompt === "string") {
-    config.filter.prompt = partial.prompt;
+  if (typeof partial.question === "string") {
+    config.filter.question = partial.question;
+  }
+  if (typeof partial.keepCriteria === "string") {
+    config.filter.keepCriteria = partial.keepCriteria;
+  }
+  if (typeof partial.rejectCriteria === "string") {
+    config.filter.rejectCriteria = partial.rejectCriteria;
   }
   if (typeof partial.enabled === "boolean") {
     config.filter.enabled = partial.enabled;
   }
-  if (typeof partial.keywords === "string") {
-    config.filter.keywords = partial.keywords;
+  if (typeof partial.allowKeywords === "string") {
+    config.filter.allowKeywords = partial.allowKeywords;
+  }
+  if (typeof partial.blockKeywords === "string") {
+    config.filter.blockKeywords = partial.blockKeywords;
   }
   if (Array.isArray(partial.sources)) {
     config.filter.sources = normalizeFilterSources(

@@ -19,27 +19,42 @@ async function updateFilterHandler({
   body,
 }: {
   body: {
-    prompt?: string;
+    question?: string;
+    keepCriteria?: string;
+    rejectCriteria?: string;
     enabled?: boolean;
-    keywords?: string;
+    allowKeywords?: string;
+    blockKeywords?: string;
     sources?: string[];
   };
 }) {
   try {
     const payload: {
-      prompt?: string;
+      question?: string;
+      keepCriteria?: string;
+      rejectCriteria?: string;
       enabled?: boolean;
-      keywords?: string;
+      allowKeywords?: string;
+      blockKeywords?: string;
       sources?: string[];
     } = {};
-    if (typeof body?.prompt === "string") {
-      payload.prompt = body.prompt;
+    if (typeof body?.question === "string") {
+      payload.question = body.question;
+    }
+    if (typeof body?.keepCriteria === "string") {
+      payload.keepCriteria = body.keepCriteria;
+    }
+    if (typeof body?.rejectCriteria === "string") {
+      payload.rejectCriteria = body.rejectCriteria;
     }
     if (typeof body?.enabled === "boolean") {
       payload.enabled = body.enabled;
     }
-    if (typeof body?.keywords === "string") {
-      payload.keywords = body.keywords;
+    if (typeof body?.allowKeywords === "string") {
+      payload.allowKeywords = body.allowKeywords;
+    }
+    if (typeof body?.blockKeywords === "string") {
+      payload.blockKeywords = body.blockKeywords;
     }
     if (Array.isArray(body?.sources)) {
       payload.sources = body.sources;
@@ -57,9 +72,12 @@ export const routes = new Elysia({ prefix: "/api/filter" })
   .get("/", getFilterHandler)
   .post("/", updateFilterHandler, {
     body: t.Object({
-      prompt: t.Optional(t.String()),
+      question: t.Optional(t.String()),
+      keepCriteria: t.Optional(t.String()),
+      rejectCriteria: t.Optional(t.String()),
       enabled: t.Optional(t.Boolean()),
-      keywords: t.Optional(t.String()),
+      allowKeywords: t.Optional(t.String()),
+      blockKeywords: t.Optional(t.String()),
       sources: t.Optional(t.Array(t.String())),
     }),
   });

@@ -1,15 +1,13 @@
 import { lookup } from "node:dns/promises";
 import { BlockList, isIP } from "node:net";
-import { EnvHttpProxyAgent, fetch as undiciFetch } from "undici";
+import { fetch as undiciFetch } from "undici";
 import type { RequestInit as UndiciRequestInit } from "undici";
-
-const dispatcher = new EnvHttpProxyAgent();
 
 async function httpRequest(
   url: string,
   init: UndiciRequestInit = {},
 ): Promise<Response> {
-  return undiciFetch(url, { ...init, dispatcher }) as unknown as Response;
+  return undiciFetch(url, init) as unknown as Response;
 }
 
 export async function httpGet(
@@ -124,9 +122,9 @@ export async function resolvePublicAddresses(
 
 /**
  * GET `url` by connecting to `address` instead of resolving the host again.
- * The URL carries the IP, so neither the runtime nor an HTTP(S) proxy gets to
- * re-resolve the name; the original host travels in the Host header and, for
- * HTTPS, as the TLS server name the certificate is verified against.
+ * The URL carries the IP, so the runtime does not get to re-resolve the name;
+ * the original host travels in the Host header and, for HTTPS, as the TLS
+ * server name the certificate is verified against.
  */
 async function pinnedGet(
   url: URL,
@@ -148,41 +146,13 @@ async function pinnedGet(
   } as unknown as UndiciRequestInit);
 }
 
-/** Whether the runtime will send `url` through `HTTP_PROXY` / `HTTPS_PROXY`. */
-function usesEnvProxy(url: URL): boolean {
-  const env = process.env;
-  const proxy =
-    url.protocol === "https:"
-      ? (env.HTTPS_PROXY ?? env.https_proxy)
-      : (env.HTTP_PROXY ?? env.http_proxy);
-  if (!proxy) return false;
-  const host = bareHostname(url);
-  return !(env.NO_PROXY ?? env.no_proxy ?? "")
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase().replace(/^\*?\./, ""))
-    .filter(Boolean)
-    .some(
-      (entry) => entry === "*" || host === entry || host.endsWith(`.${entry}`),
-    );
-}
-
-/**
- * `FETCH_PROXY_RESOLVES_DNS=true` leaves name resolution to the outbound
- * proxy, for networks where local DNS answers are unusable. The proxy's
- * answer cannot be checked from here, so the address check is then only
- * advisory for proxied requests.
- */
-function proxyResolvesDns(url: URL): boolean {
-  return process.env.FETCH_PROXY_RESOLVES_DNS === "true" && usesEnvProxy(url);
-}
-
 async function checkedGet(
   url: URL,
   init: UndiciRequestInit,
 ): Promise<Response> {
   const addresses = await resolvePublicAddresses(url);
   // Exempt hosts and IP literals involve no lookup that could change.
-  if (!addresses || isIP(bareHostname(url)) || proxyResolvesDns(url)) {
+  if (!addresses || isIP(bareHostname(url))) {
     return httpRequest(url.href, { ...init, method: "GET", redirect: "manual" });
   }
   let lastError: unknown;
