@@ -1,7 +1,7 @@
 import { get, writable } from "svelte/store";
 
 /** Logical routes (not URL pathnames). */
-export type AppRoute = "/" | "/feeds" | "/settings" | "/export";
+export type AppRoute = "/" | "/feeds" | "/stats" | "/settings" | "/export";
 
 export type SettingsTab = "preferences" | "filter" | "dedup" | "translate" | "fever" | "mcp";
 
@@ -11,6 +11,7 @@ export const route = writable<AppRoute>("/");
 
 const SUBPAGE_PATH_SUFFIXES = [
   "/feeds/",
+  "/stats/",
   "/settings/",
   "/filter/",
   "/filters/",
@@ -27,6 +28,7 @@ function isSubPagePath(path: string): boolean {
 
 function pathnameToRoute(pathname: string): AppRoute {
   if (pathname.endsWith("/feeds")) return "/feeds";
+  if (pathname.endsWith("/stats")) return "/stats";
   if (pathname.endsWith("/export")) return "/export";
   if (
     pathname.endsWith("/settings") ||
@@ -44,6 +46,7 @@ function pathnameToRoute(pathname: string): AppRoute {
 
 function routeToRelativeHref(next: AppRoute): string {
   if (next === "/feeds") return "feeds";
+  if (next === "/stats") return "stats";
   if (next === "/settings") return "settings";
   if (next === "/export") return "export";
   if (isSubPagePath(window.location.pathname)) {
@@ -63,6 +66,11 @@ export function homeHref(): string {
 /** Relative link to the feeds page. */
 export function feedsHref(): string {
   return "feeds";
+}
+
+/** Relative link to the stats page. */
+export function statsHref(): string {
+  return "stats";
 }
 
 /** Relative link to the export page. */

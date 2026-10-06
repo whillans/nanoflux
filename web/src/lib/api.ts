@@ -301,6 +301,43 @@ export async function downloadItemsExcel(options: {
   }
 }
 
+export type ItemStatusCounts = {
+  total: number;
+  passed: number;
+  rejected: number;
+  deleted: number;
+};
+
+export type ItemStats = {
+  overview: ItemStatusCounts & { duplicates: number; unread: number };
+  /** Non-empty buckets only; `bucket` is local `YYYY-MM-DD` or `YYYY-MM-DD HH`. */
+  trend: (ItemStatusCounts & { bucket: string })[];
+  byFeed: { feed_id: number; title: string; total: number; passed: number }[];
+  bySource: { source: string; total: number; passed: number }[];
+  byReason: { source: number; keyword: number; ai: number };
+};
+
+export async function fetchItemStats(options: {
+  since: string;
+  until: string;
+  bucket: "hour" | "day";
+}): Promise<ItemStats> {
+  const params = new URLSearchParams({
+    since: options.since,
+    until: options.until,
+    bucket: options.bucket,
+    tz_offset: String(new Date().getTimezoneOffset()),
+  });
+  const body = await request<{ code: number; message: string; data?: ItemStats }>(
+    `/api/items/stats?${params}`,
+  );
+  assertApiOk(body);
+  if (!body.data) {
+    throw new Error(body.message || "Failed to load stats");
+  }
+  return body.data;
+}
+
 export async function markAllItemsRead(until: string) {
   if (!until) {
     throw new Error("Missing until timestamp");

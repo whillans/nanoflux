@@ -1,4 +1,5 @@
 <script lang="ts">
+  import ChartColumn from "@lucide/svelte/icons/chart-column";
   import Download from "@lucide/svelte/icons/download";
   import LogOut from "@lucide/svelte/icons/log-out";
   import Newspaper from "@lucide/svelte/icons/newspaper";
@@ -11,6 +12,7 @@
     homeHref,
     navClick,
     route,
+    statsHref,
   } from "../lib/router";
   import SettingsButton from "./buttons/SettingsButton.svelte";
   import { authState, submitLogout } from "../lib/auth.svelte";
@@ -99,6 +101,16 @@
     >
       <Rss {...iconProps} />
       <span class={collapsed ? "md:sr-only" : ""}>{t("items.feeds")}</span>
+    </a>
+    <a
+      href={statsHref()}
+      onclick={navClick("/stats")}
+      class={navClass($route === "/stats")}
+      aria-current={$route === "/stats" ? "page" : undefined}
+      title={collapsed ? t("items.stats") : undefined}
+    >
+      <ChartColumn {...iconProps} />
+      <span class={collapsed ? "md:sr-only" : ""}>{t("items.stats")}</span>
     </a>
     <a
       href={exportHref()}

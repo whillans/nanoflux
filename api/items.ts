@@ -4,6 +4,7 @@ import {
   getItemCluster,
   getItemCover,
   getItems,
+  getItemStats,
   markItemsRead,
   markItemRead,
 } from "../db/items";
@@ -229,6 +230,45 @@ function exportItemsHandler({ query }: {
   }
 }
 
+/** Normalize a timestamp to the ISO 8601 UTC form `published_at` is stored in. */
+function parseIsoTime(raw: unknown): string | null | undefined {
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  const ms = Date.parse(raw.trim());
+  return Number.isNaN(ms) ? null : new Date(ms).toISOString();
+}
+
+function getItemStatsHandler({ query }: {
+  query?: {
+    since?: string;
+    until?: string;
+    tz_offset?: number;
+    bucket?: string;
+  };
+}) {
+  try {
+    const since = parseIsoTime(query?.since);
+    const until = parseIsoTime(query?.until);
+    if (since === null || until === null) {
+      return { code: 400, message: "Invalid time range" };
+    }
+    if (query?.bucket && query.bucket !== "hour" && query.bucket !== "day") {
+      return { code: 400, message: `Invalid bucket: ${query.bucket}` };
+    }
+
+    const data = getItemStats({
+      since,
+      until,
+      tzOffsetMin: parseTzOffset(query?.tz_offset),
+      bucket: query?.bucket === "hour" ? "hour" : "day",
+    });
+    return { code: 0, message: "ok", data };
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Failed to get item stats";
+    return { code: 500, message };
+  }
+}
+
 function markItemsReadHandler({ body }: {
   body: {
     until?: string;
@@ -299,6 +339,7 @@ async function blockSourceHandler({ body }: { body: { source?: string } }) {
 export const routes = new Elysia({ prefix: "/api/items" })
   .get("/", getItemsHandler)
   .get("/export.xlsx", exportItemsHandler)
+  .get("/stats", getItemStatsHandler)
   .get("/:id/cover", coverHandler)
   .get("/:id/cluster", getItemClusterHandler)
   .post("/read-all", markItemsReadHandler)
