@@ -112,19 +112,19 @@
       <ChartColumn {...iconProps} />
       <span class={collapsed ? "md:sr-only" : ""}>{t("items.stats")}</span>
     </a>
+  </nav>
+
+  <div class="mt-4 shrink-0 text-sm md:mt-auto">
     <a
       href={exportHref()}
       onclick={navClick("/export")}
-      class={navClass($route === "/export")}
+      class="mb-1 {navClass($route === '/export')}"
       aria-current={$route === "/export" ? "page" : undefined}
       title={collapsed ? t("items.export") : undefined}
     >
       <Download {...iconProps} />
       <span class={collapsed ? "md:sr-only" : ""}>{t("items.export")}</span>
     </a>
-  </nav>
-
-  <div class="mt-4 shrink-0 md:mt-auto">
     <SettingsButton {collapsed} />
     {#if showLogout}
       <button
