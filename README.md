@@ -270,9 +270,18 @@ If the proxy runs on a different machine, set `HOST` to the address of the inter
 ## Security Notes
 
 - Console sessions last 7 days and are kept in memory: signing out revokes the session on the server, and a restart signs out everyone.
-- Failed credentials are limited to 20 per client per 10 minutes, counted separately for the admin password, the Fever API key, and the MCP token. A blocked client receives `429`; an already signed-in session keeps working.
+- Failed credentials are limited to 20 per client per 10 minutes, counted separately for the admin password, the Fever API key, and the MCP token. An IPv6 client is its /64 network, not a single address, and each /48 shares a budget of 100. A blocked client receives `429`; an already signed-in session keeps working.
 - Every response carries a strict `Content-Security-Policy` (same-origin scripts and styles only, no inline script, no framing), `X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`.
 - Cover images in the console load through NanoFlux (`/api/items/:id/cover`) rather than from the publisher, so image hosts do not see the reader's IP address.
+- Request bodies are capped at 32 KB. Unhandled errors and missing static files answer with a generic `500` / `404` that carries no filesystem path or upstream detail.
+
+### Known limitations when exposed to the internet
+
+- **Do not publish the port through a raw TCP forwarder** (frp `tcp`, `ssh -R`, ngrok `tcp`, router-style port mappers running on the same machine) or through a proxy that adds no forwarding header. Every connection then arrives from `127.0.0.1` with headers chosen by the client: MCP without remote access enabled would accept such a client as local, and the failed-credential limit could be sidestepped or used to lock everyone out of signing in. Use built-in HTTPS, or an HTTP-aware reverse proxy that sets `X-Forwarded-For` itself as shown above. If a TCP forwarder is unavoidable, enable MCP remote access so the token is always required, and use a long random `ADMIN_PASSWORD`.
+- **Do not share the site with untrusted services.** State-changing REST calls rely on the session cookie's `SameSite=Lax` and do not check `Origin`, so a page on a sibling subdomain or on another port of the same host can act as a signed-in administrator. Serve NanoFlux from a hostname of its own.
+- **Fever credentials are weak by design of the protocol.** The API key is an unsalted `md5(user:password)` that works as a replayable password, and clients may send it in the URL, where proxies log it. Use a Fever password that is not used anywhere else, never the admin password, and leave Fever disabled if no client needs it.
+- **MCP agents read untrusted text.** Article content returned by `get_uningested_news` comes from the feeds, and the same connection offers tools that delete feeds, change filters, and post to Telegram. Treat the agent's tool calls accordingly, and prefer feeds you trust.
+- `Authorization: Bearer <ADMIN_PASSWORD>` is the admin password itself: it does not expire and cannot be revoked without changing `ADMIN_PASSWORD` and restarting.
 
 ## REST API
 

@@ -1,10 +1,13 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { isIPv6 } from "node:net";
 
 export const ADMIN_SESSION_COOKIE = "nanoflux_session";
 export const ADMIN_SESSION_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 const AUTH_FAILURE_WINDOW_MS = 10 * 60 * 1000;
 const AUTH_MAX_FAILURES = 20;
+/** Budget shared by a whole IPv6 /48, the largest block one customer usually holds. */
+const AUTH_MAX_FAILURES_PER_SITE = 100;
 const AUTH_MAX_TRACKED_CLIENTS = 10_000;
 
 /** Each credential has its own failure budget per client. */
@@ -171,10 +174,58 @@ function pruneAuthFailures(now: number): void {
   }
 }
 
+/** The eight 16-bit groups of an IPv6 address, or null if it is not one. */
+function ipv6Groups(address: string): number[] | null {
+  if (!isIPv6(address)) return null;
+  const parse = (part: string): number[] =>
+    part === ""
+      ? []
+      : part.split(":").flatMap((group) => {
+          if (!group.includes(".")) return [parseInt(group, 16)];
+          const [a = 0, b = 0, c = 0, d = 0] = group.split(".").map(Number);
+          return [(a << 8) | b, (c << 8) | d];
+        });
+  const [head = "", tail] = address.split("::");
+  const leading = parse(head);
+  const trailing = tail === undefined ? [] : parse(tail);
+  const zeros = new Array<number>(8 - leading.length - trailing.length).fill(0);
+  return [...leading, ...zeros, ...trailing];
+}
+
+/**
+ * The buckets a client's failures count against, each with its own limit.
+ * One IPv6 subscriber owns at least a /64, so counting per address would hand
+ * out a fresh budget for every address they pick; the /64 is the client, and
+ * the enclosing /48 gets a larger shared budget for those who hold more.
+ * IPv4-mapped addresses count as the IPv4 address they carry.
+ */
+export function failureBuckets(
+  scope: AuthScope,
+  client: string,
+): { key: string; limit: number }[] {
+  const address = client.replace(/^\[|\](:\d+)?$/g, "").split("%")[0] ?? "";
+  const groups = ipv6Groups(address);
+  if (!groups) return [{ key: `${scope}:${client}`, limit: AUTH_MAX_FAILURES }];
+
+  const [g0, g1, g2, g3, g4, g5, g6 = 0, g7 = 0] = groups;
+  if (!g0 && !g1 && !g2 && !g3 && !g4 && g5 === 0xffff) {
+    const ipv4 = [g6 >> 8, g6 & 0xff, g7 >> 8, g7 & 0xff].join(".");
+    return [{ key: `${scope}:${ipv4}`, limit: AUTH_MAX_FAILURES }];
+  }
+  const prefix = (count: number) =>
+    groups.slice(0, count).map((group) => group.toString(16)).join(":");
+  return [
+    { key: `${scope}:${prefix(4)}::/64`, limit: AUTH_MAX_FAILURES },
+    { key: `${scope}:${prefix(3)}::/48`, limit: AUTH_MAX_FAILURES_PER_SITE },
+  ];
+}
+
 function isAuthBlocked(scope: AuthScope, client: string, now: number): boolean {
   pruneAuthFailures(now);
-  const bucket = authFailures.get(`${scope}:${client}`);
-  return bucket !== undefined && bucket.count >= AUTH_MAX_FAILURES;
+  return failureBuckets(scope, client).some(({ key, limit }) => {
+    const bucket = authFailures.get(key);
+    return bucket !== undefined && bucket.count >= limit;
+  });
 }
 
 /**
@@ -183,15 +234,16 @@ function isAuthBlocked(scope: AuthScope, client: string, now: number): boolean {
  */
 function recordAuthFailure(scope: AuthScope, client: string, now: number): void {
   pruneAuthFailures(now);
-  const key = `${scope}:${client}`;
-  const existing = authFailures.get(key);
-  if (existing) {
-    existing.count += 1;
-    return;
+  for (const { key } of failureBuckets(scope, client)) {
+    const existing = authFailures.get(key);
+    if (existing) {
+      existing.count += 1;
+      continue;
+    }
+    if (authFailures.size >= AUTH_MAX_TRACKED_CLIENTS) {
+      const oldest = authFailures.keys().next().value;
+      if (oldest !== undefined) authFailures.delete(oldest);
+    }
+    authFailures.set(key, { count: 1, resetAt: now + AUTH_FAILURE_WINDOW_MS });
   }
-  if (authFailures.size >= AUTH_MAX_TRACKED_CLIENTS) {
-    const oldest = authFailures.keys().next().value;
-    if (oldest !== undefined) authFailures.delete(oldest);
-  }
-  authFailures.set(key, { count: 1, resetAt: now + AUTH_FAILURE_WINDOW_MS });
 }

@@ -40,8 +40,31 @@ import { syncTitleTokens } from "./db/items";
 const PUBLIC_DIR = join(import.meta.dir, "public");
 const GOOGLE_CONNECTIVITY_URL = "https://www.google.com/generate_204";
 const GOOGLE_CONNECTIVITY_TIMEOUT_MS = 10_000;
+/**
+ * Bun's default is 128 MB. The largest legitimate body is a full-length
+ * Telegram message over MCP: about 4,000 CJK characters, which is 24 KB when
+ * the client escapes them as `\uXXXX`.
+ */
+const MAX_REQUEST_BODY_BYTES = 32 * 1024;
 const indexHtml = () => Bun.file(join(PUBLIC_DIR, "index.html"));
 const serviceWorker = () => Bun.file(join(PUBLIC_DIR, "sw.js"));
+
+/**
+ * A missing file must be a plain 404: returning the `Bun.file` anyway throws
+ * ENOENT, and the error names the absolute path it tried to open.
+ */
+async function staticFile(
+  dir: string,
+  name: string,
+  set: { status?: number | string },
+) {
+  const file = Bun.file(join(PUBLIC_DIR, dir, name));
+  if (!(await file.exists())) {
+    set.status = 404;
+    return "Not Found";
+  }
+  return file;
+}
 
 async function ensureGoogleConnectivity(): Promise<void> {
   try {
@@ -182,16 +205,25 @@ const publicRoutes = new Elysia()
     return JSON.stringify(buildWebManifest(manifestLocale(query)));
   })
   .get("/sw.js", serviceWorker)
-  .get("/icons/*", ({ params }) =>
-    Bun.file(join(PUBLIC_DIR, "icons", params["*"])),
-  )
-  .get("/assets/*", ({ params }) =>
-    Bun.file(join(PUBLIC_DIR, "assets", params["*"])),
-  )
+  .get("/icons/*", ({ params, set }) => staticFile("icons", params["*"], set))
+  .get("/assets/*", ({ params, set }) => staticFile("assets", params["*"], set))
   .use(createAuthRoutes(adminAuth))
   .use(protectedBackendRoutes);
 
-const app = new Elysia().onRequest(applySecurityHeaders).use(publicRoutes);
+const app = new Elysia()
+  .onRequest(applySecurityHeaders)
+  // Elysia answers an unhandled exception with its message, which can carry
+  // filesystem paths or upstream details; log it and reply generically.
+  .onError({ as: "global" }, ({ code, error, request, set }) => {
+    if (code !== "UNKNOWN" && code !== "INTERNAL_SERVER_ERROR") return;
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(
+      `[http] ${request.method} ${new URL(request.url).pathname} failed: ${message}`,
+    );
+    set.status = 500;
+    return { code: 500, message: "Internal Server Error" };
+  })
+  .use(publicRoutes);
 
 const port = resolvePort();
 let tlsFiles: TlsFiles | null;
@@ -206,6 +238,12 @@ try {
   app.listen({
     port,
     hostname: BIND_HOST,
+    // Bun's development error page embeds the error message and stack, i.e.
+    // filesystem paths, in the response; never serve it.
+    development: false,
+    // Bodies are read before any credential is checked, so the cap is what an
+    // anonymous client can make the server buffer per request.
+    maxRequestBodySize: MAX_REQUEST_BODY_BYTES,
     ...(tlsFiles && {
       tls: {
         cert: Bun.file(tlsFiles.certFile),
