@@ -11,7 +11,6 @@ NanoFlux continuously fetches RSS / Atom feeds, Google News keyword feeds, and W
 - Build a continuously updated news source for agents instead of searching from scratch every time
 - Filter news by topic and translate titles into Chinese or English
 - Read the same news store with Fever clients such as Reeder
-- Push headlines or daily digests to a Telegram channel
 
 `is_read` tracks whether a person has read an item. It is independent of the MCP tools.
 
@@ -20,7 +19,7 @@ NanoFlux continuously fetches RSS / Atom feeds, Google News keyword feeds, and W
 - RSS / Atom feed management, OPML export, Google News keyword feeds, and WeChat official-account feeds
 - Adaptive polling, GUID deduplication, Google News canonical-link resolution, full-text extraction, and cover-image extraction
 - Filtering by source domain, title keyword, and LLM prompt; optional title translation
-- MCP tools for feed management, unconsumed news, filter settings, and Telegram delivery
+- MCP tools for feed management, unconsumed news, and filter settings
 - REST API and a password-protected web console
 - Local-only by default, with optional built-in HTTPS, per-client rate limiting of failed credentials, and SSRF protection for everything fetched from feeds
 - Fever API 3 compatibility for feeds, articles, unread items, and read state
@@ -127,12 +126,10 @@ A typical agent workflow is to create feeds with `add_feed`, `add_feed_by_keywor
 | `get_feeds` | List feeds, optionally filter by title keyword, and page with `nextCursor`; ordered by `updated_at DESC`, then `id DESC` |
 | `update_feed` / `delete_feed` | Update or delete a feed |
 | `get_uningested_news` | Get the next 50 passed first-report news items from the last three days not returned before, in ascending `item_id` order; the cursor is kept on the server |
+| `get_rejected_news` | List items rejected by the filter in the last `count` days, paged with `nextCursor`; does not affect what `get_uningested_news` returns |
 | `get_filter_config` / `update_filter_config` | Read or update filter settings |
-| `get_current_time` | Get the server's current UTC time |
-| `send_telegram_message` | Send a headline, URL, and optional HTML content |
-| `send_telegram_digest` | Send an HTML daily digest |
 
-News items include `id`, `title`, `link`, `content`, `published_at`, and `feed_title`. Rejected and deleted items are not returned.
+News items include `id`, `title`, `link`, `content`, `published_at`, and `feed_title`. `get_uningested_news` never returns rejected or deleted items.
 
 ### Fever Clients
 
@@ -162,8 +159,6 @@ Create `.env` from `.env.example`. These variables are read when the process sta
 | `LLM_API_KEY` | No | LLM API key |
 | `LLM_MODEL_NAME` | No | Model name, such as `gpt-4o-mini` |
 | `WECHATRSS_API_KEY` / `WECHATRSS_API_SECRET` | No | Credentials for WeChat official-account feeds |
-| `TELEGRAM_BOT_TOKEN` | No | Telegram bot token |
-| `TELEGRAM_CHANNEL_ID` | No | Channel username (`@channel`) or numeric ID |
 | `FETCH_ALLOW_PRIVATE_HOSTS` | No | Comma-separated hostnames or IPs exempt from the private-address block, such as a LAN RSSHub |
 | `FETCH_PROXY_RESOLVES_DNS` | No | `true` lets the outbound proxy resolve hostnames instead of NanoFlux; see below |
 
@@ -280,7 +275,7 @@ If the proxy runs on a different machine, set `HOST` to the address of the inter
 - **Do not publish the port through a raw TCP forwarder** (frp `tcp`, `ssh -R`, ngrok `tcp`, router-style port mappers running on the same machine) or through a proxy that adds no forwarding header. Every connection then arrives from `127.0.0.1` with headers chosen by the client: MCP without remote access enabled would accept such a client as local, and the failed-credential limit could be sidestepped or used to lock everyone out of signing in. Use built-in HTTPS, or an HTTP-aware reverse proxy that sets `X-Forwarded-For` itself as shown above. If a TCP forwarder is unavoidable, enable MCP remote access so the token is always required, and use a long random `ADMIN_PASSWORD`.
 - **Do not share the site with untrusted services.** State-changing REST calls rely on the session cookie's `SameSite=Lax` and do not check `Origin`, so a page on a sibling subdomain or on another port of the same host can act as a signed-in administrator. Serve NanoFlux from a hostname of its own.
 - **Fever credentials are weak by design of the protocol.** The API key is an unsalted `md5(user:password)` that works as a replayable password, and clients may send it in the URL, where proxies log it. Use a Fever password that is not used anywhere else, never the admin password, and leave Fever disabled if no client needs it.
-- **MCP agents read untrusted text.** Article content returned by `get_uningested_news` comes from the feeds, and the same connection offers tools that delete feeds, change filters, and post to Telegram. Treat the agent's tool calls accordingly, and prefer feeds you trust.
+- **MCP agents read untrusted text.** Article content returned by `get_uningested_news` comes from the feeds, and the same connection offers tools that delete feeds and change filters. Treat the agent's tool calls accordingly, and prefer feeds you trust.
 - `Authorization: Bearer <ADMIN_PASSWORD>` is the admin password itself: it does not expire and cannot be revoked without changing `ADMIN_PASSWORD` and restarting.
 
 ## REST API
@@ -333,7 +328,7 @@ api/         REST routes and authentication
 db/          Drizzle schema and data access
 fever/       Fever protocol implementation
 mcp/         MCP route and tools
-services/    Fetching, parsing, filtering, translation, scheduling, and Telegram
+services/    Fetching, parsing, filtering, translation, and scheduling
 shared/      Environment, authentication, access control, and security headers
 web/         Svelte 5 web console
 drizzle/     SQLite migrations
