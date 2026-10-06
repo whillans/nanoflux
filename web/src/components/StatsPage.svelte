@@ -5,7 +5,7 @@
 
   type RangeKey = "24h" | "7d" | "30d";
   type Bucket = "hour" | "day";
-  type Series = "passed" | "rejected" | "deleted";
+  type Series = "rejected" | "duplicates" | "firstReports";
 
   const RANGES: { key: RangeKey; label: MessageKey; bucket: Bucket; count: number }[] = [
     { key: "24h", label: "stats.range24h", bucket: "hour", count: 24 },
@@ -15,11 +15,11 @@
 
   // Fixed order, bottom of the stack first. Colors follow the status, never its rank.
   const SERIES: { key: Series; label: MessageKey; color: string }[] = [
-    { key: "passed", label: "stats.passed", color: "bg-[#2a78d6] dark:bg-[#3987e5]" },
     { key: "rejected", label: "stats.rejected", color: "bg-[#eb6834] dark:bg-[#d95926]" },
-    { key: "deleted", label: "stats.deleted", color: "bg-[#1baf7a] dark:bg-[#199e70]" },
+    { key: "duplicates", label: "stats.duplicates", color: "bg-[#1baf7a] dark:bg-[#199e70]" },
+    { key: "firstReports", label: "items.firstReport", color: "bg-[#2a78d6] dark:bg-[#3987e5]" },
   ];
-  const BAR_COLOR = SERIES[0]!.color;
+  const BAR_COLOR = SERIES.at(-1)!.color;
 
   const labelClass = "text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500";
 
@@ -92,9 +92,9 @@
           ["stats.total", stats.overview.total],
           ["stats.passed", stats.overview.passed],
           ["stats.rejected", stats.overview.rejected],
-          ["stats.deleted", stats.overview.deleted],
+          ["items.firstReport", stats.overview.firstReports],
           ["stats.duplicates", stats.overview.duplicates],
-          ["stats.unread", stats.overview.unread],
+          ["stats.mcpPending", stats.overview.mcpPending],
         ] as [MessageKey, number][])
       : [],
   );
@@ -104,13 +104,10 @@
     const byKey = new Map(stats.trend.map((row) => [row.bucket, row]));
     return bucketStarts.map((start) => {
       const row = byKey.get(bucketKey(start, loadedBucket));
-      return {
-        start,
-        total: row?.total ?? 0,
-        passed: row?.passed ?? 0,
-        rejected: row?.rejected ?? 0,
-        deleted: row?.deleted ?? 0,
-      };
+      const rejected = row?.rejected ?? 0;
+      const duplicates = row?.duplicates ?? 0;
+      const firstReports = row?.firstReports ?? 0;
+      return { start, total: rejected + duplicates + firstReports, rejected, duplicates, firstReports };
     });
   });
 

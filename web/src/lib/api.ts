@@ -309,9 +309,9 @@ export type ItemStatusCounts = {
 };
 
 export type ItemStats = {
-  overview: ItemStatusCounts & { duplicates: number; unread: number };
+  overview: ItemStatusCounts & { firstReports: number; duplicates: number; mcpPending: number };
   /** Non-empty buckets only; `bucket` is local `YYYY-MM-DD` or `YYYY-MM-DD HH`. */
-  trend: (ItemStatusCounts & { bucket: string })[];
+  trend: { bucket: string; rejected: number; duplicates: number; firstReports: number }[];
   byFeed: { feed_id: number; title: string; total: number; passed: number }[];
   bySource: { source: string; total: number; passed: number }[];
   byReason: { source: number; keyword: number; ai: number };

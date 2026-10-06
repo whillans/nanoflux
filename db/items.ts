@@ -280,9 +280,15 @@ export function getItemsForExport(options: {
 export type ItemStatusCounts = { total: number; passed: number; rejected: number; deleted: number };
 
 export type ItemStats = {
-  overview: ItemStatusCounts & { duplicates: number; unread: number };
+  overview: ItemStatusCounts & {
+    /** Visible items that do not duplicate an earlier one. */
+    firstReports: number;
+    duplicates: number;
+    /** News not yet handed out to MCP; the current backlog, not limited to the range. */
+    mcpPending: number;
+  };
   /** Non-empty buckets only, oldest first; `bucket` is local `YYYY-MM-DD` or `YYYY-MM-DD HH`. */
-  trend: (ItemStatusCounts & { bucket: string })[];
+  trend: { bucket: string; rejected: number; duplicates: number; firstReports: number }[];
   byFeed: { feed_id: number; title: string; total: number; passed: number }[];
   bySource: { source: string; total: number; passed: number }[];
   /** Rejected items by filter; `ai` is every rejection without a rule prefix. */
@@ -312,18 +318,19 @@ export function getItemStats(options: {
     const rejected = countWhere(sql`${items.status} = 'rejected'`);
     const deleted = countWhere(sql`${items.status} = 'deleted'`);
 
+    const firstReports = countWhere(sql`${items.status} = 'passed' and ${items.sim_id} is null`);
+    const duplicates = countWhere(sql`${items.status} = 'passed' and ${items.sim_id} is not null`);
+
     const overview = db
-      .select({
-        total,
-        passed,
-        rejected,
-        deleted,
-        duplicates: countWhere(sql`${items.status} = 'passed' and ${items.sim_id} is not null`),
-        unread: countWhere(sql`${items.status} = 'passed' and ${items.is_read} = 0`),
-      })
+      .select({ total, passed, rejected, deleted, firstReports, duplicates })
       .from(items)
       .where(range)
       .get()!;
+    const mcpPending = db
+      .select({ count: total })
+      .from(items)
+      .where(uningestedFilter(readMcpNewsCursor(db)))
+      .get()!.count;
 
     const localMinutes = -Math.trunc(options.tzOffsetMin);
     const modifier = `${localMinutes >= 0 ? "+" : ""}${localMinutes} minutes`;
@@ -331,10 +338,9 @@ export function getItemStats(options: {
     const trend = db
       .select({
         bucket: sql<string>`strftime(${format}, ${items.published_at}, ${modifier})`,
-        total,
-        passed,
         rejected,
-        deleted,
+        duplicates,
+        firstReports,
       })
       .from(items)
       .where(range)
@@ -376,7 +382,7 @@ export function getItemStats(options: {
       .get()!;
 
     return {
-      overview,
+      overview: { ...overview, mcpPending },
       trend,
       byFeed,
       bySource,
@@ -722,6 +728,29 @@ const MCP_NEWS_CURSOR_KEY = "mcp_news_cursor";
 /** Only news published this recently is handed out to MCP. */
 const MCP_NEWS_WINDOW_MS = 3 * TimeUnit.DAY;
 
+/** Earliest-ingested member of the cluster rooted at this item. */
+const clusterFirstId = sql<number>`min(${items.id}, coalesce((select min(m.id) from ${items} m where m.sim_id = ${items.id}), ${items.id}))`;
+
+function readMcpNewsCursor(conn: Pick<typeof db, "select">): number {
+  const stored = conn
+    .select({ value: meta.value })
+    .from(meta)
+    .where(eq(meta.key, MCP_NEWS_CURSOR_KEY))
+    .get();
+  return Number(stored?.value);
+}
+
+/** Recent visible first reports whose cluster is past the MCP cursor. */
+function uningestedFilter(cursor: number) {
+  const since = new Date(Date.now() - MCP_NEWS_WINDOW_MS).toISOString();
+  return and(
+    Number.isSafeInteger(cursor) ? gt(clusterFirstId, cursor) : undefined,
+    gte(items.published_at, since),
+    eq(items.status, "passed"),
+    isNull(items.sim_id),
+  );
+}
+
 /**
  * Hands out the next batch of recent visible first reports (items that do not
  * duplicate an earlier one) to MCP, one per news cluster.
@@ -744,16 +773,7 @@ export function takeUningestedItems(): {
 } {
   try {
     return db.transaction((tx) => {
-      const stored = tx
-        .select({ value: meta.value })
-        .from(meta)
-        .where(eq(meta.key, MCP_NEWS_CURSOR_KEY))
-        .get();
-      const cursor = Number(stored?.value);
-      const since = new Date(Date.now() - MCP_NEWS_WINDOW_MS).toISOString();
-
-      // Earliest-ingested member of the cluster rooted at this item.
-      const firstId = sql<number>`min(${items.id}, coalesce((select min(m.id) from ${items} m where m.sim_id = ${items.id}), ${items.id}))`;
+      const firstId = clusterFirstId;
 
       const selected = tx
         .select({
@@ -767,14 +787,7 @@ export function takeUningestedItems(): {
         })
         .from(items)
         .innerJoin(feeds, eq(items.feed_id, feeds.id))
-        .where(
-          and(
-            Number.isSafeInteger(cursor) ? gt(firstId, cursor) : undefined,
-            gte(items.published_at, since),
-            eq(items.status, "passed"),
-            isNull(items.sim_id),
-          ),
-        )
+        .where(uningestedFilter(readMcpNewsCursor(tx)))
         .orderBy(asc(firstId))
         .limit(MAX_LIMIT + 1)
         .all();
