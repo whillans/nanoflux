@@ -5,6 +5,27 @@ export const MAX_CONTENT_CHARS = 300;
 /** Probability of reporting the same news above which a candidate is a duplicate. */
 const DUPLICATE_THRESHOLD = 0.5;
 
+function duplicateQuestion(label: string): string {
+  return (
+    `Does ${label} report the same event or story as new_news, ` +
+    "even if worded differently, translated, or from another outlet?"
+  );
+}
+
+const DUPLICATE_CRITERIA = {
+  true: "Reports the same event or story.",
+  false: "Unrelated, or related but about a different event.",
+};
+
+/** The prompt asked per candidate, for display in settings. */
+export function getDedupPrompt() {
+  return {
+    question: duplicateQuestion("candidate_N"),
+    duplicateCriteria: DUPLICATE_CRITERIA.true,
+    distinctCriteria: DUPLICATE_CRITERIA.false,
+  };
+}
+
 export type DedupNews = {
   title: string;
   content: string | null;
@@ -37,14 +58,7 @@ export async function applyAiDedup(
   candidates.forEach((candidate, index) => {
     const label = labels[index]!;
     candidateState[label] = describe(candidate);
-    questions[label] = noul(
-      `Does ${label} report the same event or story as new_news, ` +
-        "even if worded differently, translated, or from another outlet?",
-      {
-        true: "Reports the same event or story.",
-        false: "Unrelated, or related but about a different event.",
-      },
-    );
+    questions[label] = noul(duplicateQuestion(label), DUPLICATE_CRITERIA);
   });
 
   try {

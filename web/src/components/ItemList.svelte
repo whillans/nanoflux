@@ -283,23 +283,26 @@
               </p>
             {/if}
             {#if item.source || item.sim_id !== null || item.duplicate_count > 0}
-              <div class="mt-2 flex h-4 items-center justify-between gap-3 text-xs leading-4 text-neutral-400 dark:text-neutral-500">
-                <p class="group flex min-w-0 items-center gap-1">
-                  {#if item.source}
-                    <span>{item.source}</span>
+              <div class="group mt-2 flex h-4 min-w-0 items-center gap-1.5 text-xs leading-4 text-neutral-400 dark:text-neutral-500">
+                {#if item.source}
+                  <span class="flex min-w-0 items-center">
+                    <span class="truncate">{item.source}</span>
                     <button
                       type="button"
-                      class="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded p-0 text-neutral-400 opacity-0 transition-[color,background-color,opacity] group-hover:opacity-100 focus-visible:opacity-100 hover:bg-red-50 hover:text-red-600 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                      class="inline-flex h-4 w-0 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded p-0 text-neutral-400 opacity-0 transition-[color,background-color,opacity,width,margin] group-hover:ml-1 group-hover:w-4 group-hover:opacity-100 focus-visible:ml-1 focus-visible:w-4 focus-visible:opacity-100 hover:bg-red-50 hover:text-red-600 disabled:cursor-wait disabled:opacity-50 dark:hover:bg-red-950/40 dark:hover:text-red-400"
                       aria-label={`${t("items.blockSource")} ${item.source}`}
                       title={t("items.blockSource")}
                       disabled={blockingSources.has(item.source)}
                       onclick={() => void handleBlockSource(item.source)}
                     >
-                      <Ban size={14} strokeWidth={1.5} aria-hidden={true} />
+                      <Ban size={14} strokeWidth={1.5} class="shrink-0" aria-hidden={true} />
                     </button>
-                  {/if}
-                </p>
+                  </span>
+                {/if}
                 {#if item.sim_id !== null || item.duplicate_count > 0}
+                  {#if item.source}
+                    <span class="text-neutral-300 dark:text-neutral-600" aria-hidden="true">·</span>
+                  {/if}
                   <button
                     type="button"
                     class="-mx-1 shrink-0 cursor-pointer rounded px-1 hover:text-neutral-700 dark:hover:text-neutral-200 {item.sim_id ===

@@ -4,10 +4,15 @@ import {
   updateDedupState,
   type DedupConfig,
 } from "../config";
+import { getDedupPrompt } from "../services/dedup/ai";
 
 function getDedupHandler() {
   try {
-    return { code: 0, message: "ok", data: getDedupState() };
+    return {
+      code: 0,
+      message: "ok",
+      data: { ...getDedupState(), prompt: getDedupPrompt() },
+    };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to get dedup config";
@@ -27,7 +32,7 @@ async function updateDedupHandler({ body }: { body: Partial<DedupConfig> }) {
       payload.maxCandidates = body.maxCandidates;
     }
     const updated = await updateDedupState(payload);
-    return { code: 0, message: "ok", data: updated };
+    return { code: 0, message: "ok", data: { ...updated, prompt: getDedupPrompt() } };
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Failed to update dedup config";

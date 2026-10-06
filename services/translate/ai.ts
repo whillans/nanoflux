@@ -1,5 +1,5 @@
 import { getAiConfig } from "../ai/client";
-import { translate } from "../ai/translate";
+import { translate, translateSystemPrompt } from "../ai/translate";
 import type { TranslateTargetLang } from "../../translate";
 import { isTitleInTargetLang } from "./detect";
 
@@ -8,6 +8,15 @@ const TARGET_LANG_LABEL: Record<TranslateTargetLang, string> = {
   "zh-Hans": "Simplified Chinese",
   "zh-Hant": "Traditional Chinese",
 };
+
+/** The system prompt used per target language, for display in settings. */
+export function getTranslatePrompts(): Record<TranslateTargetLang, string> {
+  return {
+    en: translateSystemPrompt(TARGET_LANG_LABEL.en),
+    "zh-Hans": translateSystemPrompt(TARGET_LANG_LABEL["zh-Hans"]),
+    "zh-Hant": translateSystemPrompt(TARGET_LANG_LABEL["zh-Hant"]),
+  };
+}
 
 function unwrapTitle(text: string): string {
   let value = text.trim();

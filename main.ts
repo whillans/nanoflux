@@ -104,9 +104,9 @@ try {
   process.exit(1);
 }
 {
-  const { prompt, enabled, keywords, sources } = getFilterConfig();
+  const { question, keepCriteria, rejectCriteria, enabled, allowKeywords, blockKeywords, sources } = getFilterConfig();
   console.log(
-    `[filter] config loaded enabled=${enabled} promptChars=${prompt.trim().length} keywordChars=${keywords.trim().length} sources=${sources.length}`,
+    `[filter] config loaded enabled=${enabled} questionChars=${question.trim().length} keepCriteriaChars=${keepCriteria.trim().length} rejectCriteriaChars=${rejectCriteria.trim().length} allowKeywordChars=${allowKeywords.trim().length} blockKeywordChars=${blockKeywords.trim().length} sources=${sources.length}`,
   );
 }
 {

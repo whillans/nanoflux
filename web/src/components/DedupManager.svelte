@@ -1,19 +1,33 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { fetchDedup, updateDedup, type DedupConfig } from "../lib/api";
+  import Segmented from "./settings/Segmented.svelte";
+  import SettingRow from "./settings/SettingRow.svelte";
+  import {
+    fetchDedup,
+    updateDedup,
+    type DedupConfig,
+    type DedupPrompt,
+    type DedupState,
+  } from "../lib/api";
+  import {
+    fieldLabelClass,
+    groupHintClass,
+    inputClass,
+    pageHintClass,
+    readonlyInputClass,
+    saveButtonClass,
+    sectionListClass,
+  } from "../lib/formStyles";
   import { t } from "../lib/locale.svelte";
 
-  const inputClass =
-    "w-32 border-0 border-b border-neutral-200 bg-transparent py-2 text-sm outline-none placeholder:text-neutral-300 focus:border-neutral-900 dark:border-neutral-700 dark:placeholder:text-neutral-600 dark:focus:border-neutral-100";
-  const labelClass =
-    "block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500";
-  const hintClass = "text-xs text-neutral-400 dark:text-neutral-500";
+  const numberClass = `w-24 shrink-0 self-start sm:self-auto ${inputClass}`;
 
   let enabled = $state(true);
   let windowDays = $state(3);
   let minSimilarity = $state(0.6);
   let maxCandidates = $state(5);
   let saved = $state<DedupConfig | null>(null);
+  let prompt = $state<DedupPrompt | null>(null);
   let formError = $state("");
   let loading = $state(true);
   let saving = $state(false);
@@ -38,18 +52,13 @@
   );
   const saveDisabled = $derived(saving || loading || !isDirty || !isValid);
 
-  function toggleClass(active: boolean): string {
-    return active
-      ? "text-neutral-900 underline underline-offset-4 decoration-neutral-900 dark:text-neutral-100 dark:decoration-neutral-100"
-      : "text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300";
-  }
-
-  function apply(config: DedupConfig) {
+  function apply(config: DedupState) {
     enabled = config.enabled;
     windowDays = config.windowDays;
     minSimilarity = config.minSimilarity;
     maxCandidates = config.maxCandidates;
     saved = config;
+    prompt = config.prompt ?? null;
   }
 
   async function loadDedup() {
@@ -83,96 +92,105 @@
 </script>
 
 <section class="mb-10">
-  <p class="mb-6 text-sm text-neutral-400 dark:text-neutral-500">
-    {t("dedup.hint")}
-  </p>
+  <p class={pageHintClass}>{t("dedup.hint")}</p>
   {#if loading}
     <p class="text-sm text-neutral-300 dark:text-neutral-600">{t("items.loading")}</p>
   {:else}
-    <div class="space-y-8">
-      <div class="space-y-3">
-        <span class={labelClass}>{t("dedup.enabled")}</span>
-        <div
-          class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm"
-          role="group"
-          aria-label={t("dedup.enabled")}
-        >
-          <button
-            type="button"
-            class="transition-colors {toggleClass(enabled)}"
-            aria-pressed={enabled}
-            disabled={saving}
-            onclick={() => (enabled = true)}
-          >
-            {t("dedup.on")}
-          </button>
-          <button
-            type="button"
-            class="transition-colors {toggleClass(!enabled)}"
-            aria-pressed={!enabled}
-            disabled={saving}
-            onclick={() => (enabled = false)}
-          >
-            {t("dedup.off")}
-          </button>
-        </div>
-      </div>
+    <div class={sectionListClass}>
+      <SettingRow label={t("dedup.enabled")}>
+        <Segmented
+          label={t("dedup.enabled")}
+          value={enabled}
+          options={[
+            { value: true, label: t("dedup.on") },
+            { value: false, label: t("dedup.off") },
+          ]}
+          disabled={saving}
+          onchange={(next) => (enabled = next)}
+        />
+      </SettingRow>
 
-      <label class="block space-y-2">
-        <span class={labelClass}>{t("dedup.windowDays")}</span>
+      <SettingRow
+        for="dedup-window-days"
+        label={t("dedup.windowDays")}
+        hint={t("dedup.windowDaysHint")}
+      >
         <input
+          id="dedup-window-days"
           type="number"
           min="1"
           max="30"
           step="1"
           bind:value={windowDays}
-          class={inputClass}
+          class={numberClass}
           disabled={saving}
         />
-        <p class={hintClass}>{t("dedup.windowDaysHint")}</p>
-      </label>
+      </SettingRow>
 
-      <label class="block space-y-2">
-        <span class={labelClass}>{t("dedup.minSimilarity")}</span>
+      <SettingRow
+        for="dedup-min-similarity"
+        label={t("dedup.minSimilarity")}
+        hint={t("dedup.minSimilarityHint")}
+      >
         <input
+          id="dedup-min-similarity"
           type="number"
           min="0"
           max="1"
           step="0.05"
           bind:value={minSimilarity}
-          class={inputClass}
+          class={numberClass}
           disabled={saving}
         />
-        <p class={hintClass}>{t("dedup.minSimilarityHint")}</p>
-      </label>
+      </SettingRow>
 
-      <label class="block space-y-2">
-        <span class={labelClass}>{t("dedup.maxCandidates")}</span>
+      <SettingRow
+        for="dedup-max-candidates"
+        label={t("dedup.maxCandidates")}
+        hint={t("dedup.maxCandidatesHint")}
+      >
         <input
+          id="dedup-max-candidates"
           type="number"
           min="1"
           max="20"
           step="1"
           bind:value={maxCandidates}
-          class={inputClass}
+          class={numberClass}
           disabled={saving}
         />
-        <p class={hintClass}>{t("dedup.maxCandidatesHint")}</p>
-      </label>
+      </SettingRow>
 
-      {#if !isValid}
-        <p class="text-sm text-red-500">{t("dedup.invalid")}</p>
+      {#if prompt}
+        <div class="space-y-5 py-6">
+          <p class={groupHintClass}>{t("dedup.promptHint")}</p>
+          {#each [{ label: t("dedup.promptQuestion"), text: prompt.question }, { label: t("dedup.promptDuplicate"), text: prompt.duplicateCriteria }, { label: t("dedup.promptDistinct"), text: prompt.distinctCriteria }] as field (field.label)}
+            <label class="block space-y-2">
+              <span class={fieldLabelClass}>{field.label}</span>
+              <textarea
+                readonly
+                rows="2"
+                value={field.text}
+                class="field-sizing-content w-full resize-none {readonlyInputClass}"
+              ></textarea>
+            </label>
+          {/each}
+        </div>
       {/if}
-
-      <button
-        type="button"
-        disabled={saveDisabled}
-        class="text-sm text-neutral-900 underline-offset-4 hover:underline disabled:opacity-50 dark:text-neutral-100"
-        onclick={() => void handleSave()}
-      >
-        {saving ? t("dedup.saving") : t("dedup.save")}
-      </button>
     </div>
+
+    {#if !isValid}
+      <p class="mt-2 text-sm text-red-500">{t("dedup.invalid")}</p>
+    {/if}
+
+    <button
+      type="button"
+      disabled={saveDisabled}
+      class="mt-2 {saveButtonClass}"
+      onclick={() => void handleSave()}
+    >
+      {saving ? t("dedup.saving") : t("dedup.save")}
+    </button>
   {/if}
   {#if formError}
     <p class="mt-3 text-sm text-red-500">{formError}</p>

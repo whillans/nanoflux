@@ -1,12 +1,24 @@
 <script lang="ts">
   import { onMount } from "svelte";
   import { Check, Copy } from "@lucide/svelte";
+  import Segmented from "./settings/Segmented.svelte";
+  import SettingRow from "./settings/SettingRow.svelte";
   import {
     fetchMcp,
     fetchMcpEndpoint,
     generateMcpToken,
     updateMcp,
   } from "../lib/api";
+  import {
+    codeBoxClass,
+    codeTextClass,
+    copyButtonClass,
+    fieldHintClass,
+    fieldLabelClass,
+    pageHintClass,
+    saveButtonClass,
+    sectionListClass,
+  } from "../lib/formStyles";
   import { t } from "../lib/locale.svelte";
 
   let remoteAccess = $state(false);
@@ -46,12 +58,6 @@
       2,
     ),
   );
-
-  function toggleClass(active: boolean): string {
-    return active
-      ? "text-neutral-900 underline underline-offset-4 decoration-neutral-900 dark:text-neutral-100 dark:decoration-neutral-100"
-      : "text-neutral-400 hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300";
-  }
 
   async function loadMcp() {
     loading = true;
@@ -132,26 +138,31 @@
 </script>
 
 <section class="mb-10">
-  <p class="mb-6 text-sm text-neutral-400 dark:text-neutral-500">{t("mcp.hint")}</p>
+  <p class={pageHintClass}>{t("mcp.hint")}</p>
   {#if loading}
     <p class="text-sm text-neutral-300 dark:text-neutral-600">{t("items.loading")}</p>
   {:else}
-    <div class="space-y-8">
-      <div class="space-y-3">
-        <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">{t("mcp.remoteAccess")}</span>
-        <div class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm" role="group" aria-label={t("mcp.remoteAccess")}>
-          <button type="button" class="transition-colors {toggleClass(!remoteAccess)}" aria-pressed={!remoteAccess} disabled={saving} onclick={() => (remoteAccess = false)}>{t("mcp.localOnly")}</button>
-          <button type="button" class="transition-colors {toggleClass(remoteAccess)}" aria-pressed={remoteAccess} disabled={saving} onclick={() => void enableRemoteAccess()}>{t("mcp.remoteEnabled")}</button>
-        </div>
-      </div>
+    <div class={sectionListClass}>
+      <SettingRow label={t("mcp.remoteAccess")}>
+        <Segmented
+          label={t("mcp.remoteAccess")}
+          value={remoteAccess}
+          options={[
+            { value: false, label: t("mcp.localOnly") },
+            { value: true, label: t("mcp.remoteEnabled") },
+          ]}
+          disabled={saving}
+          onchange={(next) => (next ? void enableRemoteAccess() : (remoteAccess = false))}
+        />
+      </SettingRow>
 
       {#if remoteAccess}
-        <div class="space-y-3">
-          <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">{t("mcp.authorization")}</span>
+        <div class="space-y-2 py-6">
+          <span class={fieldLabelClass}>{t("mcp.authorization")}</span>
           {#if authorization}
-            <div class="flex items-center gap-2 rounded bg-neutral-100 p-3 dark:bg-neutral-800">
-              <code class="min-w-0 flex-1 break-all text-sm text-neutral-800 dark:text-neutral-100">Authorization: Bearer {authorization}</code>
-              <button type="button" class="shrink-0 text-neutral-500 transition-colors hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100" aria-label={t("mcp.copy")} title={t("mcp.copy")} onclick={() => void copyAuthorization()}>
+            <div class="items-center {codeBoxClass}">
+              <code class="break-all {codeTextClass}">Authorization: Bearer {authorization}</code>
+              <button type="button" class={copyButtonClass} aria-label={t("mcp.copy")} title={t("mcp.copy")} onclick={() => void copyAuthorization()}>
                 {#if copied}
                   <Check size={17} />
                 {:else}
@@ -159,21 +170,21 @@
                 {/if}
               </button>
             </div>
-            {#if copied}<span class="block text-xs text-neutral-500 dark:text-neutral-400">{t("mcp.copied")}</span>{/if}
+            {#if copied}<span class="block {fieldHintClass}">{t("mcp.copied")}</span>{/if}
             {#if isDirty}
               <span class="block text-xs text-amber-600 dark:text-amber-400">{t("mcp.authorizationSave")}</span>
             {/if}
           {:else}
-            <span class="block text-xs text-neutral-400 dark:text-neutral-500">{t("mcp.authorizationConfigured")}</span>
+            <span class="block {fieldHintClass}">{t("mcp.authorizationConfigured")}</span>
           {/if}
         </div>
       {/if}
 
-      <div class="space-y-2">
-        <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">{t("mcp.endpoint")}</span>
-        <div class="flex items-center gap-2 rounded bg-neutral-100 p-3 dark:bg-neutral-800">
-          <code class="min-w-0 flex-1 break-all text-sm text-neutral-800 dark:text-neutral-100">{endpointUrl}</code>
-          <button type="button" class="shrink-0 text-neutral-500 transition-colors hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100" aria-label={t("mcp.copyEndpoint")} title={t("mcp.copyEndpoint")} onclick={() => void copyEndpoint()}>
+      <div class="space-y-2 py-6">
+        <span class={fieldLabelClass}>{t("mcp.endpoint")}</span>
+        <div class="items-center {codeBoxClass}">
+          <code class="break-all {codeTextClass}">{endpointUrl}</code>
+          <button type="button" class={copyButtonClass} aria-label={t("mcp.copyEndpoint")} title={t("mcp.copyEndpoint")} onclick={() => void copyEndpoint()}>
             {#if endpointCopied}
               <Check size={17} />
             {:else}
@@ -181,14 +192,14 @@
             {/if}
           </button>
         </div>
-        {#if endpointCopied}<span class="block text-xs text-neutral-500 dark:text-neutral-400">{t("mcp.copied")}</span>{/if}
+        {#if endpointCopied}<span class="block {fieldHintClass}">{t("mcp.copied")}</span>{/if}
       </div>
 
-      <div class="space-y-2">
-        <span class="block text-xs uppercase tracking-widest text-neutral-400 dark:text-neutral-500">{t("mcp.jsonConfig")}</span>
-        <div class="flex items-start gap-2 rounded bg-neutral-100 p-3 dark:bg-neutral-800">
-          <pre class="min-w-0 flex-1 overflow-x-auto text-sm text-neutral-800 dark:text-neutral-100"><code>{mcpJsonConfig}</code></pre>
-          <button type="button" class="shrink-0 text-neutral-500 transition-colors hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100" aria-label={t("mcp.copyJsonConfig")} title={t("mcp.copyJsonConfig")} onclick={() => void copyJsonConfig()}>
+      <div class="space-y-2 py-6">
+        <span class={fieldLabelClass}>{t("mcp.jsonConfig")}</span>
+        <div class="items-start {codeBoxClass}">
+          <pre class="overflow-x-auto {codeTextClass}"><code>{mcpJsonConfig}</code></pre>
+          <button type="button" class={copyButtonClass} aria-label={t("mcp.copyJsonConfig")} title={t("mcp.copyJsonConfig")} onclick={() => void copyJsonConfig()}>
             {#if configCopied}
               <Check size={17} />
             {:else}
@@ -196,11 +207,11 @@
             {/if}
           </button>
         </div>
-        {#if configCopied}<span class="block text-xs text-neutral-500 dark:text-neutral-400">{t("mcp.copied")}</span>{/if}
+        {#if configCopied}<span class="block {fieldHintClass}">{t("mcp.copied")}</span>{/if}
       </div>
-
-      <button type="button" disabled={saveDisabled} class="text-sm text-neutral-900 underline-offset-4 hover:underline disabled:opacity-50 dark:text-neutral-100" onclick={() => void handleSave()}>{saving ? t("mcp.saving") : t("mcp.save")}</button>
     </div>
+
+    <button type="button" disabled={saveDisabled} class="mt-2 {saveButtonClass}" onclick={() => void handleSave()}>{saving ? t("mcp.saving") : t("mcp.save")}</button>
   {/if}
   {#if formError}<p class="mt-3 text-sm text-red-500">{formError}</p>{/if}
 </section>

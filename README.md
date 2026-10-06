@@ -17,8 +17,8 @@ NanoFlux continuously fetches RSS / Atom feeds, Google News keyword feeds, and W
 ## Highlights
 
 - RSS / Atom feed management, OPML export, Google News keyword feeds, and WeChat official-account feeds
-- Adaptive polling, GUID deduplication, Google News canonical-link resolution, full-text extraction, and cover-image extraction
-- Filtering by source domain, title keyword, and LLM prompt; optional title translation
+- Adaptive polling, GUID deduplication, LLM-assisted duplicate detection across feeds, Google News canonical-link resolution, full-text extraction, and cover-image extraction
+- Filtering by source domain, title keyword, and LLM criteria; optional title translation
 - MCP tools for feed management, unconsumed news, and filter settings
 - REST API and a password-protected web console
 - Local-only by default, with optional built-in HTTPS, per-client rate limiting of failed credentials, and SSRF protection for everything fetched from feeds
@@ -85,7 +85,7 @@ Database migrations run automatically when the service starts.
 Sign in with `ADMIN_PASSWORD` to:
 
 - Add, preview, edit, or remove RSS feeds, and subscribe to Google News by keyword
-- Configure filtering, title translation, Fever credentials, and display preferences
+- Configure filtering, duplicate detection, title translation, MCP access, Fever credentials, and display preferences; the duplicate-detection and translation pages show the fixed prompt sent to the LLM
 - Browse unread or all news, block a source, and export to Excel
 - Review statistics for the last 24 hours, 7 days, or 30 days: fetched, passed, filtered, first-report, and duplicate counts, how much news MCP has not read yet, a trend chart of filtered, duplicate, and first-report news, the top feeds and sources, and why items were filtered
 
@@ -161,21 +161,10 @@ Create `.env` from `.env.example`. These variables are read when the process sta
 | `LLM_MODEL_NAME` | No | Model name, such as `gpt-4o-mini` |
 | `WECHATRSS_API_KEY` / `WECHATRSS_API_SECRET` | No | Credentials for WeChat official-account feeds |
 | `FETCH_ALLOW_PRIVATE_HOSTS` | No | Comma-separated hostnames or IPs exempt from the private-address block, such as a LAN RSSHub |
-| `FETCH_PROXY_RESOLVES_DNS` | No | `true` lets the outbound proxy resolve hostnames instead of NanoFlux; see below |
-
-Outbound HTTP requests support the standard `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` variables:
-
-```env
-HTTPS_PROXY=http://127.0.0.1:9080
-NO_PROXY=localhost,127.0.0.1
-```
 
 Feed, article, and cover requests are refused when a URL, or any redirect it follows, resolves to a loopback, private, link-local, or other non-public address. This keeps feed content from steering NanoFlux at internal services or cloud metadata endpoints.
 
-Each hostname is resolved once, and the request is then sent to the address that was checked, so a DNS answer that changes after the check (DNS rebinding) cannot move the connection to an internal host. This also applies behind `HTTP_PROXY` / `HTTPS_PROXY`: the proxy is asked for the checked IP rather than the hostname. Two consequences when a proxy is configured:
-
-- Plain `http://` URLs lose their `Host` header at the proxy, so most of them fail. Set only `HTTPS_PROXY` to send plain HTTP directly.
-- Sites are reached at the address your local DNS returns. If local DNS is unreliable for the sites you read, set `FETCH_PROXY_RESOLVES_DNS=true`. The proxy then resolves hostnames, NanoFlux can no longer verify where proxied requests land, and the proxy itself should refuse private destinations.
+Each hostname is resolved once, and the request is then sent to the address that was checked, so a DNS answer that changes after the check (DNS rebinding) cannot move the connection to an internal host.
 
 ### Access from Other Devices
 
@@ -227,13 +216,22 @@ If the proxy runs on a different machine, set `HOST` to the address of the inter
 {
   "filter": {
     "enabled": true,
-    "prompt": "Keep only news directly related to asset-management regulation, product launches, or institutional fund flows.",
-    "keywords": "sponsored, giveaway, celebrity gossip",
+    "question": "Should this news be kept?",
+    "keepCriteria": "Directly related to asset-management regulation, product launches, or institutional fund flows.",
+    "rejectCriteria": "Sponsored posts, celebrity gossip, or anything unrelated to finance.",
+    "allowKeywords": "fund flows",
+    "blockKeywords": "sponsored, giveaway, celebrity gossip",
     "sources": ["example.com"]
   },
   "translate": {
     "enabled": true,
     "targetLang": "zh-Hans"
+  },
+  "dedup": {
+    "enabled": true,
+    "windowDays": 3,
+    "minSimilarity": 0.6,
+    "maxCandidates": 5
   },
   "fever": {
     "enabled": true,
@@ -247,8 +245,9 @@ If the proxy runs on a different machine, set `HOST` to the address of the inter
 }
 ```
 
-- When `filter.enabled` is on, source domains, title keywords, and then the LLM prompt are evaluated in that order. Domain and keyword matches do not call the LLM, and are checked before the article page is fetched, so rejected items are never scraped. Google News items are matched by their `<source>` publisher domain before the Google link is resolved.
+- When `filter.enabled` is on, source domains, title keywords, and then the LLM are evaluated in that order. A title containing an `allowKeywords` entry passes directly, skipping `blockKeywords` and the LLM; a title containing a `blockKeywords` entry is rejected. Keywords are literal title matches, so the LLM is the recommended way to filter and keywords are best kept as a supplement. The LLM answers `question` as yes/no for each item, with `keepCriteria` describing a yes (keep) and `rejectCriteria` a no (reject); an empty `question` defaults to "Should this news be kept?", and the LLM is skipped when all three are empty. A `prompt` from an older config is read as `keepCriteria`, and `keywords` as `blockKeywords`; both old names are dropped the next time settings are saved. Domain and keyword matches do not call the LLM, and are checked before the article page is fetched, so rejected items are never scraped. Google News items are matched by their `<source>` publisher domain before the Google link is resolved.
 - `translate.targetLang` supports `en`, `zh-Hans`, and `zh-Hant`.
+- When `dedup.enabled` is on (the default), each passed item is compared with stored items published within `windowDays` (1–30) of it. Candidates whose title similarity exceeds `minSimilarity` (0–1) are ranked, and the top `maxCandidates` (1–20) are sent to the LLM, which decides whether they report the same event. A confirmed duplicate stays in the store but is linked to the first report and is not returned by `get_uningested_news`. Without a configured LLM, duplicate detection is skipped.
 - If the LLM is not configured or a request fails, items that do not match a domain or keyword still pass through; translation failures preserve the original title.
 - Filtering and translation apply only to newly fetched news; existing items are not reprocessed.
 - Fever requires a username and a strong password when enabled. Passwords are never returned by public configuration endpoints.
@@ -303,8 +302,9 @@ JSON responses use `{ "code": 0, "message": "", "data": ... }`; download endpoin
 | Items | `GET /api/items/stats` | Count news by status, first report or duplicate, time bucket, feed, source, and filter reason, plus the MCP backlog |
 | Items | `POST /api/items/:id/read`, `POST /api/items/read-all` | Mark items as read |
 | Items | `POST /api/items/block-source` | Block a source and hide current visible news from it |
-| Settings | `GET` / `POST /api/filter` | Filter settings |
-| Settings | `GET` / `POST /api/translate` | Translation settings |
+| Settings | `GET` / `POST /api/filter` | Filter settings: `enabled`, `question`, `keepCriteria`, `rejectCriteria`, `allowKeywords`, `blockKeywords`, `sources` |
+| Settings | `GET` / `POST /api/translate` | Translation settings; responses include the read-only `prompts` used per target language |
+| Settings | `GET` / `POST /api/dedup` | Duplicate-detection settings; responses include the read-only `prompt` asked per candidate |
 | Settings | `GET` / `POST /api/fever` | Fever configuration, not the Fever protocol itself |
 
 List endpoints support `cursor` and `limit` (default 20, maximum 50). `GET /api/items` also accepts `is_read=0|1`, `since`, `until`, or `unit` plus `count` for time filtering. Excel export supports `since`, `until`, `tz_offset`, and `lang`. `GET /api/items/stats` supports `since`, `until`, `tz_offset`, and `bucket=hour|day`; it counts by `published_at` and, unlike the list, includes rejected and deleted items. `overview.mcpPending` is the news `get_uningested_news` has not handed out yet; it is the current backlog and ignores the time range.

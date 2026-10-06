@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import {
-  hasFilterPrompt,
+  hasAiFilter,
   hasKeywordFilter,
   hasSourceFilter,
   updateFilterConfig,
@@ -12,36 +12,57 @@ export function registerUpdateFilterConfig(server: McpServer): void {
     "update_filter_config",
     {
       description:
-        "Set source, keyword, and AI content filters for newly fetched articles. Source matches are rejected first, followed by title keyword matches, then AI filtering.",
+        "Set the news filter for newly fetched articles: source, keyword, and AI filters applied in that order, all controlled by the single `enabled` switch. Source matches are rejected first; titles matching an allow keyword then pass directly; block keyword matches are rejected; the rest go to AI filtering.",
       inputSchema: {
-        prompt: z
+        question: z
           .string()
           .optional()
           .describe(
-            "Filter criteria for the LLM. Empty string skips LLM filtering even if enabled.",
+            "Yes/no question the AI answers about each item, where yes keeps it. Empty string uses the default \"Should this news be kept?\".",
+          ),
+        keepCriteria: z
+          .string()
+          .optional()
+          .describe("Describes news the AI should keep (the yes outcome)."),
+        rejectCriteria: z
+          .string()
+          .optional()
+          .describe(
+            "Describes news the AI should reject (the no outcome). AI filtering is skipped when question, keepCriteria, and rejectCriteria are all empty.",
           ),
         enabled: z
           .boolean()
           .optional()
           .describe(
-            "Turn AI filtering on or off without clearing the prompt.",
+            "Master switch for the source, keyword, and AI filters together. Turning it off keeps every setting and lets all newly fetched items pass.",
           ),
-        keywords: z
+        allowKeywords: z
           .string()
           .optional()
-          .describe("Comma-separated title keywords to reject when keyword filtering is enabled."),
+          .describe(
+            "Comma-separated title keywords that always pass, skipping the blocklist and AI filtering. Prefer the AI criteria for nuanced filtering.",
+          ),
+        blockKeywords: z
+          .string()
+          .optional()
+          .describe(
+            "Comma-separated title keywords to reject. Prefer the AI criteria for nuanced filtering.",
+          ),
         sources: z
           .array(z.string())
           .optional()
           .describe("Source domains to reject before keyword and AI filtering."),
       },
     },
-    async ({ prompt, enabled, keywords, sources }) => {
+    async ({ question, keepCriteria, rejectCriteria, enabled, allowKeywords, blockKeywords, sources }) => {
       try {
         const updated = await updateFilterConfig({
-          prompt,
+          question,
+          keepCriteria,
+          rejectCriteria,
           enabled,
-          keywords,
+          allowKeywords,
+          blockKeywords,
           sources,
         });
         return {
@@ -51,11 +72,14 @@ export function registerUpdateFilterConfig(server: McpServer): void {
               text: JSON.stringify(
                 {
                   updated: true,
-                  prompt: updated.prompt,
+                  question: updated.question,
+                  keepCriteria: updated.keepCriteria,
+                  rejectCriteria: updated.rejectCriteria,
                   enabled: updated.enabled,
-                  keywords: updated.keywords,
+                  allowKeywords: updated.allowKeywords,
+                  blockKeywords: updated.blockKeywords,
                   sources: updated.sources,
-                  active: hasFilterPrompt() || hasKeywordFilter() || hasSourceFilter(),
+                  active: hasAiFilter() || hasKeywordFilter() || hasSourceFilter(),
                 },
                 null,
                 2,

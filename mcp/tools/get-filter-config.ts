@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import {
   getFilterConfig,
-  hasFilterPrompt,
+  hasAiFilter,
   hasKeywordFilter,
   hasSourceFilter,
 } from "../../filter";
@@ -11,7 +11,7 @@ export function registerGetFilterConfig(server: McpServer): void {
     "get_filter_config",
     {
       description:
-        "Get the source, keyword, and AI content filter configuration. Sources are rejected first, then title keywords, then AI filtering.",
+        "Get the news filter configuration: source, keyword, and AI filters applied in that order, all controlled by the single `enabled` switch. Sources are rejected first; titles matching an allow keyword then pass directly; block keyword matches are rejected; the rest go to AI filtering. `active` is true when the switch is on and at least one of the three filters is configured.",
     },
     async () => {
       try {
@@ -22,7 +22,7 @@ export function registerGetFilterConfig(server: McpServer): void {
               text: JSON.stringify(
                 {
                   ...getFilterConfig(),
-                  active: hasFilterPrompt() || hasKeywordFilter() || hasSourceFilter(),
+                  active: hasAiFilter() || hasKeywordFilter() || hasSourceFilter(),
                 },
                 null,
                 2,

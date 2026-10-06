@@ -5,13 +5,14 @@ import {
   updateTranslateConfig,
   type TranslateTargetLang,
 } from "../translate";
+import { getTranslatePrompts } from "../services/translate/ai";
 
 function getTranslateHandler() {
   try {
     return {
       code: 0,
       message: "ok",
-      data: getTranslateConfig(),
+      data: { ...getTranslateConfig(), prompts: getTranslatePrompts() },
     };
   } catch (error) {
     const message =
@@ -41,7 +42,11 @@ async function updateTranslateHandler({
       payload.targetLang = targetLang;
     }
     const updated = await updateTranslateConfig(payload);
-    return { code: 0, message: "ok", data: updated };
+    return {
+      code: 0,
+      message: "ok",
+      data: { ...updated, prompts: getTranslatePrompts() },
+    };
   } catch (error) {
     const message =
       error instanceof Error

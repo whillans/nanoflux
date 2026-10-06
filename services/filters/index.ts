@@ -1,9 +1,10 @@
 import {
   getFilterConfig,
-  getFilterPrompt,
-  hasFilterPrompt,
+  hasAllowKeywords,
+  hasAiFilter,
   hasKeywordFilter,
   hasSourceFilter,
+  parseKeywords,
 } from "../../filter";
 import { applyAiFilter } from "./ai";
 
@@ -14,19 +15,18 @@ type ItemFilterResult = {
 
 /**
  * Apply the single AI filter.
- * Disabled or empty prompt skips filtering (`status = passed`, `status_reason` null).
- * Enabled with a prompt returns a rejection status and reason when appropriate.
+ * Disabled, or no question and criteria, skips filtering (`status = passed`, `status_reason` null).
+ * Otherwise returns a rejection status and reason when appropriate.
  */
 async function applyItemFilter(
   title: string,
   content: string | null,
 ): Promise<ItemFilterResult> {
-  if (!hasFilterPrompt()) {
+  if (!hasAiFilter()) {
     return { status: "passed", status_reason: null };
   }
-  const prompt = getFilterPrompt().trim();
 
-  const result = await applyAiFilter(title, content, prompt);
+  const result = await applyAiFilter(title, content, getFilterConfig());
   if (!result.passed) {
     return {
       status: "rejected",
@@ -37,18 +37,24 @@ async function applyItemFilter(
   return { status: "passed", status_reason: null };
 }
 
-function matchingKeyword(title: string): string | null {
-  if (!hasKeywordFilter()) return null;
-  const keywords = getFilterConfig().keywords
-    .split(/[,，]/)
-    .map((keyword) => keyword.trim())
-    .filter(Boolean);
+function findKeyword(title: string, rawKeywords: string): string | null {
   const normalizedTitle = title.toLocaleLowerCase();
   return (
-    keywords.find((keyword) =>
+    parseKeywords(rawKeywords).find((keyword) =>
       normalizedTitle.includes(keyword.toLocaleLowerCase()),
     ) ?? null
   );
+}
+
+function matchingBlockKeyword(title: string): string | null {
+  if (!hasKeywordFilter()) return null;
+  return findKeyword(title, getFilterConfig().blockKeywords);
+}
+
+/** The allowlist keyword in `title`, which exempts it from blocklist and AI checks. */
+function matchingAllowKeyword(title: string): string | null {
+  if (!hasAllowKeywords()) return null;
+  return findKeyword(title, getFilterConfig().allowKeywords);
 }
 
 function matchingSource(source: string | undefined): string | null {
@@ -61,7 +67,8 @@ function matchingSource(source: string | undefined): string | null {
 
 /**
  * Source and title-keyword checks, which need no network or LLM. Returns the
- * rejection for a matching item, or null when the item should go on.
+ * rejection for a matching item, or null when the item should go on. A blocked
+ * source always rejects; an allowlist keyword overrides the blocklist.
  */
 export function ruleRejection(item: {
   title: string;
@@ -71,7 +78,8 @@ export function ruleRejection(item: {
   if (source) {
     return { status: "rejected", status_reason: `Source filter: ${source}` };
   }
-  const keyword = matchingKeyword(item.title);
+  if (matchingAllowKeyword(item.title)) return null;
+  const keyword = matchingBlockKeyword(item.title);
   if (keyword) {
     return { status: "rejected", status_reason: `Keyword filter: ${keyword}` };
   }
@@ -99,7 +107,7 @@ export async function filterItems<
 
   const keywordActive = hasKeywordFilter();
   const sourceActive = hasSourceFilter();
-  const aiActive = hasFilterPrompt();
+  const aiActive = hasAiFilter();
   if (!sourceActive && !keywordActive && !aiActive) {
     console.log(
       `[filter] inactive — skip AI for ${items.length} item(s) (status_reason stays null)`,
@@ -119,6 +127,7 @@ export async function filterItems<
   let rejected = 0;
   let keywordRejected = 0;
   let sourceRejected = 0;
+  let allowed = 0;
   for (const item of items) {
     const rule = ruleRejection(item);
     if (rule) {
@@ -128,13 +137,19 @@ export async function filterItems<
       filtered.push({ ...item, ...rule });
       continue;
     }
+    if (matchingAllowKeyword(item.title)) {
+      passed += 1;
+      allowed += 1;
+      filtered.push({ ...item, status: "passed", status_reason: null });
+      continue;
+    }
     const verdict = await applyItemFilter(item.title, item.content);
     if (verdict.status === "rejected") rejected += 1;
     else passed += 1;
     filtered.push({ ...item, ...verdict });
   }
   console.log(
-    `[filter] done passed=${passed} rejected=${rejected} sourceRejected=${sourceRejected} keywordRejected=${keywordRejected}`,
+    `[filter] done passed=${passed} rejected=${rejected} sourceRejected=${sourceRejected} keywordRejected=${keywordRejected} keywordAllowed=${allowed}`,
   );
   return filtered;
 }
