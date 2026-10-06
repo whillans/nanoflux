@@ -41,9 +41,8 @@ const PUBLIC_DIR = join(import.meta.dir, "public");
 const GOOGLE_CONNECTIVITY_URL = "https://www.google.com/generate_204";
 const GOOGLE_CONNECTIVITY_TIMEOUT_MS = 10_000;
 /**
- * Bun's default is 128 MB. The largest legitimate body is a full-length
- * Telegram message over MCP: about 4,000 CJK characters, which is 24 KB when
- * the client escapes them as `\uXXXX`.
+ * Bun's default is 128 MB. Legitimate bodies are small JSON payloads; 32 KB
+ * leaves room for about 4,000 CJK characters escaped as `\uXXXX` (24 KB).
  */
 const MAX_REQUEST_BODY_BYTES = 32 * 1024;
 const indexHtml = () => Bun.file(join(PUBLIC_DIR, "index.html"));
