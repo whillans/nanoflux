@@ -89,13 +89,15 @@
   const tiles = $derived(
     stats
       ? ([
-          ["stats.total", stats.overview.total],
-          ["stats.passed", stats.overview.passed],
-          ["stats.rejected", stats.overview.rejected],
-          ["items.firstReport", stats.overview.firstReports],
-          ["stats.duplicates", stats.overview.duplicates],
-          ["stats.mcpPending", stats.overview.mcpPending],
-        ] as [MessageKey, number][])
+          ["stats.total", fmt(stats.overview.total)],
+          ["stats.passed", fmt(stats.overview.passed)],
+          ["stats.rejected", fmt(stats.overview.rejected)],
+          ["stats.passRateTitle", percent(stats.overview.passed, stats.overview.total)],
+          ["stats.mcpPending", fmt(stats.overview.mcpPending)],
+          ["items.firstReport", fmt(stats.overview.firstReports)],
+          ["stats.duplicates", fmt(stats.overview.duplicates)],
+          ["stats.duplicateRate", percent(stats.overview.duplicates, stats.overview.passed)],
+        ] as [MessageKey, string][])
       : [],
   );
 
@@ -230,11 +232,11 @@
     <p class="text-sm text-neutral-400 dark:text-neutral-500">{t("items.loading")}</p>
   {:else}
     <div class="space-y-12 transition-opacity {loading ? 'opacity-50' : ''}">
-      <dl class="grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-3">
+      <dl class="grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-4">
         {#each tiles as [label, value] (label)}
           <div class="space-y-2">
             <dt class={labelClass}>{t(label)}</dt>
-            <dd class="text-3xl font-medium tracking-tight">{fmt(value)}</dd>
+            <dd class="text-3xl font-medium tracking-tight">{value}</dd>
           </div>
         {/each}
       </dl>

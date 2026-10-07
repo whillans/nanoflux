@@ -87,7 +87,7 @@ Sign in with `ADMIN_PASSWORD` to:
 - Add, preview, edit, or remove RSS feeds, and subscribe to Google News by keyword
 - Configure filtering, duplicate detection, title translation, MCP access, Fever credentials, and display preferences; the duplicate-detection and translation pages show the fixed prompt sent to the LLM
 - Browse unread or all news, block a source, and export to Excel
-- Review statistics for the last 24 hours, 7 days, or 30 days: fetched, passed, filtered, first-report, and duplicate counts, how much news MCP has not read yet, a trend chart of filtered, duplicate, and first-report news, the top feeds and sources, and why items were filtered
+- Review statistics for the last 24 hours, 7 days, or 30 days: fetched, passed, filtered, first-report, and duplicate counts, the pass rate (passed out of fetched) and duplicate rate (duplicates out of passed), how much news MCP has not read yet, a trend chart of filtered, duplicate, and first-report news, the top feeds and sources, and why items were filtered
 
 New feeds are fetched immediately; there is no need to wait for the next scheduler run.
 
