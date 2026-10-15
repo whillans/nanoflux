@@ -12,6 +12,7 @@ import { isHttpUrl } from "../../shared/url";
 import { isMd5Format, md5Hex } from "../../utils/hash";
 import { stripHtml } from "../../utils/html";
 import { enrichItemsContent, resolveItemLinks } from "../content/extractor";
+import { measureStage } from "../cpu-stats";
 import { addItemsWithDedup } from "../dedup";
 import { filterItems, partitionByRules } from "../filters";
 import { isGoogleNewsArticleUrl } from "../google-news";
@@ -148,10 +149,12 @@ export async function fetchFeed(feed: Feed): Promise<{
     feed.fetch_interval_min || DEFAULT_FETCH_INTERVAL_MIN;
 
   try {
-    const result = await fetchRssFeedConditional(feed.url, rssParser, {
-      etag: feed.http_etag,
-      lastModified: feed.http_last_modified,
-    });
+    const result = await measureStage("rss", () =>
+      fetchRssFeedConditional(feed.url, rssParser, {
+        etag: feed.http_etag,
+        lastModified: feed.http_last_modified,
+      }),
+    );
     if (result.notModified) {
       const nextInterval = nextFetchIntervalMin(currentInterval, 0, []);
       updateFeedFetchState(feed.id, {
@@ -181,7 +184,7 @@ export async function fetchFeed(feed: Feed): Promise<{
     // are never resolved or scraped. A resolved link can show a different
     // domain than the `<source>` hint, so resolved items are screened again.
     const [earlyRejected, screened] = partitionByRules(batch);
-    const resolved = (await resolveItemLinks(screened)).map((item) => ({
+    const resolved = (await measureStage("resolve", () => resolveItemLinks(screened))).map((item) => ({
       ...item,
       source: sourceFromLink(item.link),
     }));
@@ -192,14 +195,14 @@ export async function fetchFeed(feed: Feed): Promise<{
         `[filter] ${feed.title}: rules rejected ${ruleRejected}/${batch.length} before scraping`,
       );
     }
-    const enriched = await enrichItemsContent(kept);
+    const enriched = await measureStage("scrape", () => enrichItemsContent(kept));
     const filtered = [
       ...earlyRejected,
       ...lateRejected,
-      ...(await filterItems(enriched)),
+      ...(await measureStage("filter", () => filterItems(enriched))),
     ];
-    const translated = await translateItemTitles(filtered);
-    const inserted = await addItemsWithDedup(feed.id, translated);
+    const translated = await measureStage("translate", () => translateItemTitles(filtered));
+    const inserted = await measureStage("dedup", () => addItemsWithDedup(feed.id, translated));
 
     const nextInterval =
       remaining > 0

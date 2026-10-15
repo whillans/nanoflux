@@ -361,6 +361,19 @@ export type SystemStatus = {
     heapTotal: number;
     uptimeSec: number;
   };
+  cpuStats: {
+    sampleIntervalSec: number;
+    /** Oldest first; `process` and `pipeline` use 100 = one core. */
+    history: { at: number; process: number; pipeline: number }[];
+    processCpuSec: number;
+    pipelineCpuSec: number;
+    stages: {
+      stage: "rss" | "resolve" | "scrape" | "filter" | "translate" | "dedup";
+      runs: number;
+      cpuSec: number;
+      wallSec: number;
+    }[];
+  };
 };
 
 export async function fetchSystemStatus(): Promise<SystemStatus> {

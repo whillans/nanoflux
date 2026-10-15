@@ -88,7 +88,7 @@ Sign in with `ADMIN_PASSWORD` to:
 - Configure filtering, duplicate detection, title translation, MCP access, Fever credentials, and display preferences; the duplicate-detection and translation pages show the fixed prompt sent to the LLM
 - Browse unread or all news, block a source, and export to Excel
 - Review statistics for the last 24 hours, 7 days, or 30 days: fetched, passed, filtered, first-report, and duplicate counts, the pass rate (passed out of fetched) and duplicate rate (duplicates out of passed), how much news MCP has not read yet, a trend chart of filtered, duplicate, and first-report news, the top feeds and sources, and why items were filtered
-- Watch server and NanoFlux resource usage on the System page, refreshed every 3 seconds: server CPU, load average, and memory, plus the NanoFlux process's CPU, resident memory (RSS), and JS heap. Process CPU follows top/htop, where 100% is one fully busy core
+- Watch server and NanoFlux resource usage on the System page, refreshed every 3 seconds: server CPU, load average, and memory, plus the NanoFlux process's CPU, resident memory (RSS), and JS heap. Process CPU follows top/htop, where 100% is one fully busy core. A chart of the last hour splits process CPU into the fetch pipeline and everything outside it, and a breakdown lists CPU time since start for each stage (RSS fetch, link resolution, article scraping, AI filter, translation, dedup), so you can tell whether CPU goes to fetching or to the runtime itself
 
 New feeds are fetched immediately; there is no need to wait for the next scheduler run.
 
@@ -303,7 +303,7 @@ JSON responses use `{ "code": 0, "message": "", "data": ... }`; download endpoin
 | Items | `GET /api/items/stats` | Count news by status, first report or duplicate, time bucket, feed, source, and filter reason, plus the MCP backlog |
 | Items | `POST /api/items/:id/read`, `POST /api/items/read-all` | Mark items as read |
 | Items | `POST /api/items/block-source` | Block a source and hide current visible news from it |
-| System | `GET /api/system` | Server CPU and memory, and the NanoFlux process's CPU, RSS, and JS heap |
+| System | `GET /api/system` | Server CPU and memory, the NanoFlux process's CPU, RSS, and JS heap, and process CPU split by fetch stage (`cpuStats`, last hour sampled every 10 s) |
 | Settings | `GET` / `POST /api/filter` | Filter settings: `enabled`, `question`, `keepCriteria`, `rejectCriteria`, `allowKeywords`, `blockKeywords`, `sources` |
 | Settings | `GET` / `POST /api/translate` | Translation settings; responses include the read-only `prompts` used per target language |
 | Settings | `GET` / `POST /api/dedup` | Duplicate-detection settings; responses include the read-only `prompt` asked per candidate |

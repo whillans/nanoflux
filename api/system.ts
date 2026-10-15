@@ -1,5 +1,6 @@
 import { cpus, freemem, hostname, loadavg, platform, release, totalmem, uptime } from "node:os";
 import { Elysia } from "elysia";
+import { getCpuStats } from "../services/cpu-stats";
 
 /** CPU percentages are deltas, so a reading needs at least this much elapsed time. */
 const MIN_SAMPLE_MS = 500;
@@ -117,6 +118,7 @@ async function getSystemHandler() {
           heapTotal: memory.heapTotal,
           uptimeSec: process.uptime(),
         },
+        cpuStats: getCpuStats(),
       },
     };
   } catch (error) {
