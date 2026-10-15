@@ -6,6 +6,7 @@
   import PanelLeftClose from "@lucide/svelte/icons/panel-left-close";
   import PanelLeftOpen from "@lucide/svelte/icons/panel-left-open";
   import Rss from "@lucide/svelte/icons/rss";
+  import Server from "@lucide/svelte/icons/server";
   import {
     exportHref,
     feedsHref,
@@ -13,6 +14,7 @@
     navClick,
     route,
     statsHref,
+    systemHref,
   } from "../lib/router";
   import SettingsButton from "./buttons/SettingsButton.svelte";
   import { authState, submitLogout } from "../lib/auth.svelte";
@@ -111,6 +113,16 @@
     >
       <ChartColumn {...iconProps} />
       <span class={collapsed ? "md:sr-only" : ""}>{t("items.stats")}</span>
+    </a>
+    <a
+      href={systemHref()}
+      onclick={navClick("/system")}
+      class={navClass($route === "/system")}
+      aria-current={$route === "/system" ? "page" : undefined}
+      title={collapsed ? t("items.system") : undefined}
+    >
+      <Server {...iconProps} />
+      <span class={collapsed ? "md:sr-only" : ""}>{t("items.system")}</span>
     </a>
   </nav>
 

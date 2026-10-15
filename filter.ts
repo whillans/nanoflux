@@ -15,12 +15,12 @@ export function getFilterConfig(): FilterConfig {
   return getFilterState();
 }
 
-/** Whether AI filtering is active (enabled, with a question or criteria set). */
+/** Whether AI filtering is active (enabled, with the question and both criteria set). */
 export function hasAiFilter(): boolean {
   const { question, keepCriteria, rejectCriteria, enabled } = getFilterState();
   return (
     enabled &&
-    [question, keepCriteria, rejectCriteria].some((text) => text.trim().length > 0)
+    [question, keepCriteria, rejectCriteria].every((text) => text.trim().length > 0)
   );
 }
 

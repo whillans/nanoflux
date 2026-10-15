@@ -21,6 +21,7 @@ import { routes as translateRoutes } from "./api/translate";
 import { routes as dedupRoutes } from "./api/dedup";
 import { routes as feverRoutes } from "./api/fever";
 import { routes as mcpConfigRoutes } from "./api/mcp";
+import { routes as systemRoutes } from "./api/system";
 import {
   handleFeverRequest,
   isFeverApiQuery,
@@ -144,7 +145,8 @@ const restRoutes = new Elysia()
   .use(translateRoutes)
   .use(dedupRoutes)
   .use(feverRoutes)
-  .use(mcpConfigRoutes);
+  .use(mcpConfigRoutes)
+  .use(systemRoutes);
 
 const protectedBackendRoutes = new Elysia()
   .use(withAdminAuth(restRoutes, adminAuth))
@@ -195,6 +197,7 @@ const publicRoutes = new Elysia()
   .get("/dedup", indexHtml)
   .get("/export", indexHtml)
   .get("/stats", indexHtml)
+  .get("/system", indexHtml)
   .get("/fever", feverGet)
   .get("/fever/", feverGet)
   .get("/mcp-settings", indexHtml)

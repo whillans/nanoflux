@@ -338,6 +338,42 @@ export async function fetchItemStats(options: {
   return body.data;
 }
 
+export type SystemStatus = {
+  system: {
+    hostname: string;
+    platform: string;
+    cpuModel: string;
+    cpuCores: number;
+    /** Share of all cores, 0–100. */
+    cpuPercent: number;
+    loadAvg: number[];
+    memoryTotal: number;
+    memoryUsed: number;
+    uptimeSec: number;
+  };
+  process: {
+    pid: number;
+    runtime: string;
+    /** 100 = one fully busy core, as in top/htop. */
+    cpuPercent: number;
+    rss: number;
+    heapUsed: number;
+    heapTotal: number;
+    uptimeSec: number;
+  };
+};
+
+export async function fetchSystemStatus(): Promise<SystemStatus> {
+  const body = await request<{ code: number; message: string; data?: SystemStatus }>(
+    "/api/system",
+  );
+  assertApiOk(body);
+  if (!body.data) {
+    throw new Error(body.message || "Failed to load system status");
+  }
+  return body.data;
+}
+
 export async function markAllItemsRead(until: string) {
   if (!until) {
     throw new Error("Missing until timestamp");
