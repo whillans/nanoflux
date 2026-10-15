@@ -4,8 +4,6 @@ import { getAiConfig, systemOne } from "../ai/client";
 const MAX_CONTENT_CHARS = 3000;
 /** Probability that the news matches the criteria, at or above which it is kept. */
 const PASS_THRESHOLD = 0.5;
-/** Asked when only criteria are configured. */
-const DEFAULT_QUESTION = "Should this news be kept?";
 
 /** The user's filter as a yes/no question: "yes" keeps the news. */
 export type AiFilterQuestion = {
@@ -32,7 +30,7 @@ export async function applyAiFilter(
   const question = filter.question.trim();
   const keepCriteria = filter.keepCriteria.trim();
   const rejectCriteria = filter.rejectCriteria.trim();
-  if (!question && !keepCriteria && !rejectCriteria) {
+  if (!question || !keepCriteria || !rejectCriteria) {
     return passThrough();
   }
 
@@ -49,9 +47,9 @@ export async function applyAiFilter(
     const { pass } = await systemOne(
       { title, content: bodyContent || "(empty)" },
       {
-        pass: noul(question || DEFAULT_QUESTION, {
-          true: keepCriteria || null,
-          false: rejectCriteria || null,
+        pass: noul(question, {
+          true: keepCriteria,
+          false: rejectCriteria,
         }),
       },
     );

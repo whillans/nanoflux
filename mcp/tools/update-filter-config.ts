@@ -18,7 +18,7 @@ export function registerUpdateFilterConfig(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Yes/no question the AI answers about each item, where yes keeps it. Empty string uses the default \"Should this news be kept?\".",
+            "Yes/no question the AI answers about each item, where yes keeps it.",
           ),
         keepCriteria: z
           .string()
@@ -28,7 +28,7 @@ export function registerUpdateFilterConfig(server: McpServer): void {
           .string()
           .optional()
           .describe(
-            "Describes news the AI should reject (the no outcome). AI filtering is skipped when question, keepCriteria, and rejectCriteria are all empty.",
+            "Describes news the AI should reject (the no outcome). AI filtering only runs when question, keepCriteria, and rejectCriteria are all set; it is skipped if any is empty.",
           ),
         enabled: z
           .boolean()
