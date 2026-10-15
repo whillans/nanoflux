@@ -23,7 +23,7 @@ NanoFlux continuously fetches RSS / Atom feeds, Google News keyword feeds, and W
 - REST API and a password-protected web console
 - Local-only by default, with optional built-in HTTPS, per-client rate limiting of failed credentials, and SSRF protection for everything fetched from feeds
 - Fever API 3 compatibility for feeds, articles, unread items, and read state
-- SQLite persistence, news statistics, Excel export, PWA support, light/dark themes, and English / Simplified Chinese / Traditional Chinese UI
+- SQLite persistence, news statistics, a system monitor page, Excel export, PWA support, light/dark themes, and English / Simplified Chinese / Traditional Chinese UI
 
 ## Quick Start
 
@@ -88,6 +88,7 @@ Sign in with `ADMIN_PASSWORD` to:
 - Configure filtering, duplicate detection, title translation, MCP access, Fever credentials, and display preferences; the duplicate-detection and translation pages show the fixed prompt sent to the LLM
 - Browse unread or all news, block a source, and export to Excel
 - Review statistics for the last 24 hours, 7 days, or 30 days: fetched, passed, filtered, first-report, and duplicate counts, the pass rate (passed out of fetched) and duplicate rate (duplicates out of passed), how much news MCP has not read yet, a trend chart of filtered, duplicate, and first-report news, the top feeds and sources, and why items were filtered
+- Watch server and NanoFlux resource usage on the System page, refreshed every 3 seconds: server CPU, load average, and memory, plus the NanoFlux process's CPU, resident memory (RSS), and JS heap. Process CPU follows top/htop, where 100% is one fully busy core
 
 New feeds are fetched immediately; there is no need to wait for the next scheduler run.
 
@@ -302,12 +303,13 @@ JSON responses use `{ "code": 0, "message": "", "data": ... }`; download endpoin
 | Items | `GET /api/items/stats` | Count news by status, first report or duplicate, time bucket, feed, source, and filter reason, plus the MCP backlog |
 | Items | `POST /api/items/:id/read`, `POST /api/items/read-all` | Mark items as read |
 | Items | `POST /api/items/block-source` | Block a source and hide current visible news from it |
+| System | `GET /api/system` | Server CPU and memory, and the NanoFlux process's CPU, RSS, and JS heap |
 | Settings | `GET` / `POST /api/filter` | Filter settings: `enabled`, `question`, `keepCriteria`, `rejectCriteria`, `allowKeywords`, `blockKeywords`, `sources` |
 | Settings | `GET` / `POST /api/translate` | Translation settings; responses include the read-only `prompts` used per target language |
 | Settings | `GET` / `POST /api/dedup` | Duplicate-detection settings; responses include the read-only `prompt` asked per candidate |
 | Settings | `GET` / `POST /api/fever` | Fever configuration, not the Fever protocol itself |
 
-List endpoints support `cursor` and `limit` (default 20, maximum 50). `GET /api/items` also accepts `is_read=0|1`, `since`, `until`, or `unit` plus `count` for time filtering. Excel export supports `since`, `until`, `tz_offset`, and `lang`. `GET /api/items/stats` supports `since`, `until`, `tz_offset`, and `bucket=hour|day`; it counts by `published_at` and, unlike the list, includes rejected and deleted items. `overview.mcpPending` is the news `get_uningested_news` has not handed out yet; it is the current backlog and ignores the time range.
+List endpoints support `cursor` and `limit` (default 20, maximum 50). `GET /api/items` also accepts `is_read=0|1`, `since`, `until`, or `unit` plus `count` for time filtering. Excel export supports `since`, `until`, `tz_offset`, and `lang`. `GET /api/items/stats` supports `since`, `until`, `tz_offset`, and `bucket=hour|day`; it counts by `published_at` and, unlike the list, includes rejected and deleted items. `overview.mcpPending` is the news `get_uningested_news` has not handed out yet; it is the current backlog and ignores the time range. `GET /api/system` reports CPU as the change since the previous request (the first request waits 0.5 s for a baseline); on Linux, used memory excludes reclaimable page cache (`MemAvailable`).
 
 ## Background Mode and Autostart
 

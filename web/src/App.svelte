@@ -5,6 +5,7 @@
   import SettingsManager from "./components/SettingsManager.svelte";
   import ExportPage from "./components/ExportPage.svelte";
   import StatsPage from "./components/StatsPage.svelte";
+  import SystemPage from "./components/SystemPage.svelte";
   import NewsList from "./components/ItemList.svelte";
   import LoginGate from "./components/LoginGate.svelte";
   import { authState, initAuth } from "./lib/auth.svelte";
@@ -38,6 +39,8 @@
             <FeedsManager />
           {:else if $route === "/stats"}
             <StatsPage />
+          {:else if $route === "/system"}
+            <SystemPage />
           {:else if $route === "/export"}
             <ExportPage />
           {:else}
