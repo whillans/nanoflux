@@ -3,6 +3,7 @@ import { randomBytes } from "node:crypto";
 import { resolve } from "node:path";
 import { z } from "zod";
 import { passwordStrengthError } from "./shared/password-strength";
+import { isHttpUrl } from "./shared/url";
 
 export const TRANSLATE_TARGET_LANGS = ["en", "zh-Hans", "zh-Hant"] as const;
 export type TranslateTargetLang = (typeof TRANSLATE_TARGET_LANGS)[number];
@@ -57,6 +58,15 @@ export type McpConfig = {
   authorization: string;
 };
 
+export type HermesConfig = {
+  /** Push newly passed items to a Hermes Agent webhook route. */
+  enabled: boolean;
+  /** Full route URL, e.g. `http://127.0.0.1:8644/webhooks/nanoflux`. */
+  url: string;
+  /** HMAC secret shared with the Hermes route. */
+  secret: string;
+};
+
 export type TokenizerConfig = {
   /** Tokens dropped from `title_tokens`, matched case-insensitively. */
   stopwords: string[];
@@ -80,6 +90,7 @@ export type AppConfig = {
   dedup: DedupConfig;
   fever: FeverConfig;
   mcp: McpConfig;
+  hermes: HermesConfig;
   tokenizer: TokenizerConfig;
 };
 
@@ -172,6 +183,12 @@ const McpSchema = z.object({
   authorization: z.string().default(""),
 });
 
+const HermesSchema = z.object({
+  enabled: z.boolean().default(false),
+  url: z.string().default(""),
+  secret: z.string().default(""),
+});
+
 const TokenizerSchema = z.object({
   stopwords: z
     .array(z.string())
@@ -185,6 +202,7 @@ const AppConfigSchema = z.object({
   dedup: DedupSchema.prefault({}),
   fever: FeverSchema.prefault({}),
   mcp: McpSchema.prefault({}),
+  hermes: HermesSchema.prefault({}),
   tokenizer: TokenizerSchema.prefault({}),
 });
 
@@ -302,6 +320,10 @@ export function getFeverState(): FeverConfig {
 
 export function getMcpState(): McpConfig {
   return { ...config.mcp };
+}
+
+export function getHermesState(): HermesConfig {
+  return { ...config.hermes };
 }
 
 export function getTokenizerState(): TokenizerConfig {
@@ -428,4 +450,32 @@ export async function updateMcpState(partial: {
   config.mcp.authorization = nextAuthorization;
   await persist();
   return getMcpState();
+}
+
+export async function updateHermesState(partial: {
+  enabled?: boolean;
+  url?: string;
+  secret?: string;
+}): Promise<HermesConfig> {
+  const nextUrl =
+    typeof partial.url === "string" ? partial.url.trim() : config.hermes.url;
+  const nextSecret =
+    typeof partial.secret === "string" && partial.secret.length > 0
+      ? partial.secret
+      : config.hermes.secret;
+  const nextEnabled =
+    typeof partial.enabled === "boolean" ? partial.enabled : config.hermes.enabled;
+
+  if (nextUrl && !isHttpUrl(nextUrl)) {
+    throw new Error("Hermes webhook URL must be an http(s) URL");
+  }
+  if (nextEnabled && (!nextUrl || !nextSecret)) {
+    throw new Error("Hermes webhook requires a URL and secret when enabled");
+  }
+
+  config.hermes.url = nextUrl;
+  config.hermes.secret = nextSecret;
+  config.hermes.enabled = nextEnabled;
+  await persist();
+  return getHermesState();
 }

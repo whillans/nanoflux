@@ -85,7 +85,7 @@ Database migrations run automatically when the service starts.
 Sign in with `ADMIN_PASSWORD` to:
 
 - Add, preview, edit, or remove RSS feeds, and subscribe to Google News by keyword
-- Configure filtering, duplicate detection, title translation, MCP access, Fever credentials, and display preferences; the duplicate-detection and translation pages show the fixed prompt sent to the LLM
+- Configure filtering, duplicate detection, title translation, MCP access, Fever credentials, the Hermes webhook, and display preferences; the duplicate-detection and translation pages show the fixed prompt sent to the LLM
 - Browse unread or all news, block a source, and export to Excel
 - Review statistics for the last 24 hours, 7 days, or 30 days: fetched, passed, filtered, first-report, and duplicate counts, the pass rate (passed out of fetched) and duplicate rate (duplicates out of passed), how much news MCP has not read yet, a trend chart of filtered, duplicate, and first-report news, the top feeds and sources, and why items were filtered
 - Watch server and NanoFlux resource usage on the System page, refreshed every 3 seconds: server CPU, load average, and memory, plus the NanoFlux process's CPU, resident memory (RSS), and JS heap. Process CPU follows top/htop, where 100% is one fully busy core. A chart of the last hour splits process CPU into the fetch pipeline and everything outside it, and a breakdown lists CPU time since start for each stage (RSS fetch, link resolution, article scraping, AI filter, translation, dedup), so you can tell whether CPU goes to fetching or to the runtime itself
@@ -143,6 +143,24 @@ Enable Fever under **Settings → Fever**, then configure your client with:
 A client on another device needs NanoFlux to be reachable from it; see [Access from Other Devices](#access-from-other-devices) and use the resulting `https://` URL. After 20 wrong API keys in 10 minutes, a client gets `429` until the window expires.
 
 Fever read state maps to `is_read`. Starring is not currently supported.
+
+### Hermes Webhook
+
+NanoFlux can push new news to a [Hermes Agent](https://hermes-agent.nousresearch.com/docs/user-guide/messaging/webhooks) webhook route. Create a route in Hermes with a secret, then under **Settings → Hermes** enter the route URL (for example `http://127.0.0.1:8644/webhooks/nanoflux`) and the same secret, turn push on, and save. **Send test** posts a `nanoflux.test` event with the saved settings.
+
+After each feed fetch, items that passed filtering and are not duplicates of an earlier report are sent as one JSON request:
+
+```json
+{
+  "event_type": "nanoflux.items.created",
+  "feed": { "id": 1, "title": "Example" },
+  "items": [
+    { "id": 1, "title": "…", "link": "https://…", "source": "example.com", "cover": null, "published_at": "…", "summary": "First 1,000 characters of the article text" }
+  ]
+}
+```
+
+Requests use the Hermes generic V2 signature: `X-Webhook-Timestamp` (Unix seconds) and `X-Webhook-Signature-V2`, the HMAC-SHA256 hex digest of `<timestamp>.<body>`. Each request carries a fresh `X-Request-ID`. Deliveries are sent one at a time and are not retried; a failure is logged as `[hermes]`.
 
 ## Configuration
 
@@ -242,6 +260,11 @@ If the proxy runs on a different machine, set `HOST` to the address of the inter
   "mcp": {
     "remoteAccess": false,
     "authorization": ""
+  },
+  "hermes": {
+    "enabled": false,
+    "url": "http://127.0.0.1:8644/webhooks/nanoflux",
+    "secret": ""
   }
 }
 ```
@@ -252,6 +275,7 @@ If the proxy runs on a different machine, set `HOST` to the address of the inter
 - If the LLM is not configured or a request fails, items that do not match a domain or keyword still pass through; translation failures preserve the original title.
 - Filtering and translation apply only to newly fetched news; existing items are not reprocessed.
 - Fever requires a username and a strong password when enabled. Passwords are never returned by public configuration endpoints.
+- Hermes push requires a webhook URL and secret when enabled. The secret is never returned by public configuration endpoints.
 - MCP remote access is disabled by default. Selecting remote access generates a bearer token; it only becomes active after saving. The current token is available to authenticated administrators through the MCP settings endpoint.
 
 ## Fetching and Data Rules
@@ -308,6 +332,7 @@ JSON responses use `{ "code": 0, "message": "", "data": ... }`; download endpoin
 | Settings | `GET` / `POST /api/translate` | Translation settings; responses include the read-only `prompts` used per target language |
 | Settings | `GET` / `POST /api/dedup` | Duplicate-detection settings; responses include the read-only `prompt` asked per candidate |
 | Settings | `GET` / `POST /api/fever` | Fever configuration, not the Fever protocol itself |
+| Settings | `GET` / `POST /api/hermes`, `POST /api/hermes/test` | Hermes webhook settings (`enabled`, `url`, `hasSecret`); `test` sends a test event with the saved settings |
 
 List endpoints support `cursor` and `limit` (default 20, maximum 50). `GET /api/items` also accepts `is_read=0|1`, `since`, `until`, or `unit` plus `count` for time filtering. Excel export supports `since`, `until`, `tz_offset`, and `lang`. `GET /api/items/stats` supports `since`, `until`, `tz_offset`, and `bucket=hour|day`; it counts by `published_at` and, unlike the list, includes rejected and deleted items. `overview.mcpPending` is the news `get_uningested_news` has not handed out yet; it is the current backlog and ignores the time range. `GET /api/system` reports CPU as the change since the previous request (the first request waits 0.5 s for a baseline); on Linux, used memory excludes reclaimable page cache (`MemAvailable`).
 

@@ -3,7 +3,7 @@ import { get, writable } from "svelte/store";
 /** Logical routes (not URL pathnames). */
 export type AppRoute = "/" | "/feeds" | "/stats" | "/system" | "/settings" | "/export";
 
-export type SettingsTab = "preferences" | "filter" | "dedup" | "translate" | "fever" | "mcp";
+export type SettingsTab = "preferences" | "filter" | "dedup" | "translate" | "fever" | "hermes" | "mcp";
 
 const scrollByRoute = new Map<string, number>();
 
@@ -103,6 +103,7 @@ export function settingsTabFromLocation(): SettingsTab {
     hash === "translate" ||
     hash === "dedup" ||
     hash === "fever" ||
+    hash === "hermes" ||
     hash === "mcp" ||
     hash === "filter"
   ) {

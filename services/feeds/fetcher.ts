@@ -16,6 +16,7 @@ import { measureStage } from "../cpu-stats";
 import { addItemsWithDedup } from "../dedup";
 import { filterItems, partitionByRules } from "../filters";
 import { isGoogleNewsArticleUrl } from "../google-news";
+import { pushItemsToHermes } from "../hermes/webhook";
 import { translateItemTitles } from "../translate";
 import { fetchRssFeed, fetchRssFeedConditional } from "../rss";
 import { pickCoverFromRss } from "./cover";
@@ -203,6 +204,7 @@ export async function fetchFeed(feed: Feed): Promise<{
     ];
     const translated = await measureStage("translate", () => translateItemTitles(filtered));
     const inserted = await measureStage("dedup", () => addItemsWithDedup(feed.id, translated));
+    pushItemsToHermes(feed, inserted);
 
     const nextInterval =
       remaining > 0

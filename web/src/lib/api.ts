@@ -710,6 +710,56 @@ export function updateFever(payload: {
   });
 }
 
+export type HermesConfig = {
+  enabled: boolean;
+  url: string;
+  hasSecret: boolean;
+};
+
+type HermesApiResult = {
+  code: number;
+  message: string;
+  data?: Partial<HermesConfig>;
+};
+
+function normalizeHermesConfig(data: Partial<HermesConfig> | undefined): HermesConfig {
+  return {
+    enabled: typeof data?.enabled === "boolean" ? data.enabled : false,
+    url: typeof data?.url === "string" ? data.url : "",
+    hasSecret: typeof data?.hasSecret === "boolean" ? data.hasSecret : false,
+  };
+}
+
+export async function fetchHermes(): Promise<HermesConfig> {
+  const body = await request<HermesApiResult>("/api/hermes");
+  assertApiOk(body);
+  if (!body.data) {
+    throw new Error(body.message || "Failed to load hermes config");
+  }
+  return normalizeHermesConfig(body.data);
+}
+
+export async function updateHermes(payload: {
+  enabled?: boolean;
+  url?: string;
+  secret?: string;
+}): Promise<HermesConfig> {
+  const body = await request<HermesApiResult>("/api/hermes", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  assertApiOk(body);
+  if (!body.data) {
+    throw new Error(body.message || "Failed to update hermes config");
+  }
+  return normalizeHermesConfig(body.data);
+}
+
+export async function testHermes(): Promise<void> {
+  const body = await request<ApiResult>("/api/hermes/test", { method: "POST" });
+  assertApiOk(body);
+}
+
 export type McpConfig = {
   remoteAccess: boolean;
   hasAuthorization: boolean;

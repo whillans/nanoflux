@@ -5,6 +5,7 @@
   import DedupManager from "./DedupManager.svelte";
   import TranslateManager from "./TranslateManager.svelte";
   import FeverManager from "./FeverManager.svelte";
+  import HermesManager from "./HermesManager.svelte";
   import McpManager from "./McpManager.svelte";
   import {
     type SettingsTab,
@@ -21,6 +22,7 @@
     { id: "dedup" as const, key: "items.dedup" as const },
     { id: "translate" as const, key: "items.translate" as const },
     { id: "fever" as const, key: "items.fever" as const },
+    { id: "hermes" as const, key: "items.hermes" as const },
     { id: "mcp" as const, key: "items.mcp" as const },
   ];
 
@@ -87,6 +89,8 @@
         <TranslateManager />
       {:else if tab === "fever"}
         <FeverManager />
+      {:else if tab === "hermes"}
+        <HermesManager />
       {:else}
         <McpManager />
       {/if}
