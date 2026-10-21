@@ -21,6 +21,7 @@ import { routes as translateRoutes } from "./api/translate";
 import { routes as dedupRoutes } from "./api/dedup";
 import { routes as feverRoutes } from "./api/fever";
 import { routes as mcpConfigRoutes } from "./api/mcp";
+import { routes as hermesRoutes } from "./api/hermes";
 import { routes as systemRoutes } from "./api/system";
 import {
   handleFeverRequest,
@@ -35,7 +36,7 @@ import {
 import { httpGet } from "./services/http-fetcher";
 import { getFilterConfig } from "./filter";
 import { getTranslateConfig } from "./translate";
-import { getDedupState, getTokenizerState, loadAppConfig } from "./config";
+import { getDedupState, getHermesState, getTokenizerState, loadAppConfig } from "./config";
 import { syncTitleTokens } from "./db/items";
 
 const PUBLIC_DIR = join(import.meta.dir, "public");
@@ -123,6 +124,7 @@ try {
   );
 }
 console.log(`[fever] config loaded enabled=${isFeverEnabled()}`);
+console.log(`[hermes] config loaded enabled=${getHermesState().enabled}`);
 {
   const { stopwords } = getTokenizerState();
   const { updated, full } = syncTitleTokens();
@@ -146,6 +148,7 @@ const restRoutes = new Elysia()
   .use(dedupRoutes)
   .use(feverRoutes)
   .use(mcpConfigRoutes)
+  .use(hermesRoutes)
   .use(systemRoutes);
 
 const protectedBackendRoutes = new Elysia()
