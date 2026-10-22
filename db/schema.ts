@@ -74,6 +74,8 @@ export const items = sqliteTable(
     index("idx_items_status_is_read").on(table.status, table.is_read),
     // Status-filtered timeline; `is_read` lets read/unread filters skip row lookups.
     index("idx_items_status_published_at").on(table.status, table.published_at, table.is_read),
+    // Read/unread timeline: rows come out already in `published_at` order, so no full sort.
+    index("idx_items_status_is_read_published_at").on(table.status, table.is_read, table.published_at),
     // Almost every row is NULL in these columns, so index only the rest.
     index("idx_items_sim_id").on(table.sim_id).where(sql`${table.sim_id} IS NOT NULL`),
     index("idx_items_cover").on(table.cover, table.sim_id).where(sql`${table.cover} IS NOT NULL`),
