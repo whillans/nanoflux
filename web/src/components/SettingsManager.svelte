@@ -22,8 +22,8 @@
     { id: "dedup" as const, key: "items.dedup" as const },
     { id: "translate" as const, key: "items.translate" as const },
     { id: "fever" as const, key: "items.fever" as const },
-    { id: "hermes" as const, key: "items.hermes" as const },
     { id: "mcp" as const, key: "items.mcp" as const },
+    { id: "hermes" as const, key: "items.hermes" as const },
   ];
 
   function tabClass(active: boolean): string {

@@ -168,7 +168,7 @@ const TranslateSchema = z.object({
 const DedupSchema = z.object({
   enabled: z.boolean().default(true),
   windowDays: clampedNumber(DEDUP_LIMITS.windowDays, 3, true),
-  minSimilarity: clampedNumber(DEDUP_LIMITS.minSimilarity, 0.6),
+  minSimilarity: clampedNumber(DEDUP_LIMITS.minSimilarity, 0.55),
   maxCandidates: clampedNumber(DEDUP_LIMITS.maxCandidates, 5, true),
 });
 
