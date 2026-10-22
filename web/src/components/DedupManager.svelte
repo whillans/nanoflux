@@ -24,7 +24,7 @@
 
   let enabled = $state(true);
   let windowDays = $state(3);
-  let minSimilarity = $state(0.6);
+  let minSimilarity = $state(0.55);
   let maxCandidates = $state(5);
   let saved = $state<DedupConfig | null>(null);
   let prompt = $state<DedupPrompt | null>(null);

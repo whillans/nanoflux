@@ -249,7 +249,7 @@ If the proxy runs on a different machine, set `HOST` to the address of the inter
   "dedup": {
     "enabled": true,
     "windowDays": 3,
-    "minSimilarity": 0.6,
+    "minSimilarity": 0.55,
     "maxCandidates": 5
   },
   "fever": {

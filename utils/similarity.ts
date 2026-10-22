@@ -1,6 +1,13 @@
 /** Token pairs scoring below this count as unrelated (0) in the assignment. */
 const MIN_TOKEN_SIMILARITY = 0.5;
 
+/**
+ * CJK scripts, where one character changes the meaning ("美国" vs "中国"),
+ * so their tokens match exactly only. Fuzzy matching is for alphabetic words
+ * (plurals, spelling variants).
+ */
+const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
+
 /** Edit distance over code points. */
 function levenshtein(a: string[], b: string[]): number {
   if (!a.length) return b.length;
@@ -23,6 +30,7 @@ function levenshtein(a: string[], b: string[]): number {
 /** Normalized edit similarity of two lowercase tokens, in [0, 1]. */
 function tokenSimilarity(a: string, b: string): number {
   if (a === b) return 1;
+  if (CJK.test(a) || CJK.test(b)) return 0;
   const x = [...a];
   const y = [...b];
   const score = 1 - levenshtein(x, y) / Math.max(x.length, y.length);

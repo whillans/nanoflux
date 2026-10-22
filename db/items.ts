@@ -18,6 +18,7 @@ import { getFeed } from "./feeds";
 import { feeds, items, meta, DEFAULT_LIMIT, MAX_LIMIT } from "./schema";
 import { newItemId, decodeCursor, parseItemId, parseTimeRange, TimeUnit, toUtcIso } from "./utils";
 import { titleTokens, TITLE_TOKENS_VERSION } from "../utils/text";
+import { isGoogleNewsFeedUrl } from "../shared/google-news";
 import { md5Hex } from "../utils/hash";
 import { getTokenizerState } from "../config";
 
@@ -435,6 +436,7 @@ export function addItems(
     }
 
     const feed_title = feed.title;
+    const googleNews = isGoogleNewsFeedUrl(feed.url);
     const existingGuids = getExistingGuids(newItems.map((item) => item.guid));
     const stopwords = new Set(getTokenizerState().stopwords);
 
@@ -456,7 +458,7 @@ export function addItems(
             feed_id: feedId,
             guid: newItem.guid,
             title: newItem.title,
-            title_tokens: titleTokens(newItem.title, stopwords),
+            title_tokens: titleTokens(newItem.title, stopwords, googleNews),
             link: newItem.link,
             source: sourceFromLink(newItem.link),
             content: newItem.content,
@@ -524,13 +526,18 @@ export function syncTitleTokens(): { updated: number; full: boolean } {
   const full = stored?.value !== signature;
 
   const rows = db
-    .select({ id: items.id, title: items.title, title_tokens: items.title_tokens })
+    .select({ id: items.id, title: items.title, title_tokens: items.title_tokens, feed_url: feeds.url })
     .from(items)
+    .leftJoin(feeds, eq(feeds.id, items.feed_id))
     .where(full ? undefined : isNull(items.title_tokens))
     .all();
 
   const changed = rows
-    .map((row) => ({ id: row.id, next: titleTokens(row.title, stopwords), prev: row.title_tokens }))
+    .map((row) => ({
+      id: row.id,
+      next: titleTokens(row.title, stopwords, row.feed_url !== null && isGoogleNewsFeedUrl(row.feed_url)),
+      prev: row.title_tokens,
+    }))
     .filter((row) => row.next !== row.prev);
 
   db.transaction((tx) => {
@@ -590,11 +597,11 @@ function resolveCluster(
 export function getDedupCandidates(
   publishedAt: string,
   windowMs: number,
-): { id: number; title_tokens: string }[] {
+): { id: number; sim_id: number | null; title_tokens: string }[] {
   const center = Date.parse(publishedAt);
   if (Number.isNaN(center)) return [];
   return db
-    .select({ id: items.id, title_tokens: sql<string>`${items.title_tokens}` })
+    .select({ id: items.id, sim_id: items.sim_id, title_tokens: sql<string>`${items.title_tokens}` })
     .from(items)
     .where(
       and(
